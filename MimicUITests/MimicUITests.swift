@@ -32,14 +32,14 @@ final class MimicUITests: MimicUITestCase {
 
         welcome.newProjectButton.click()
 
-        XCTAssertTrue(newProjectSheet.nameField.waitForExistence(timeout: 3),
+        XCTAssertTrue(newProjectSheet.nameField.waitToExist(timeout: 3),
                       "Project name field should appear in sheet")
         XCTAssertTrue(newProjectSheet.portField.exists)
 
         newProjectSheet.nameField.click()
         newProjectSheet.nameField.typeText("Test API")
 
-        XCTAssertTrue(newProjectSheet.createButton.waitForExistence(timeout: 2))
+        XCTAssertTrue(newProjectSheet.createButton.waitToExist(timeout: 2))
         XCTAssertTrue(newProjectSheet.createButton.isEnabled,
                       "Create button should be enabled after typing a name")
 
@@ -57,11 +57,11 @@ final class MimicUITests: MimicUITestCase {
         createProjectViaUI(name: "Layout Test")
 
         // Sidebar with empty state
-        XCTAssertTrue(workspace.sidebarEmptyHeading.waitForExistence(timeout: 5),
+        XCTAssertTrue(workspace.sidebarEmptyHeading.waitToExist(timeout: 5),
                       "Sidebar should show 'No endpoints' empty state")
 
         // Center pane: a project with no endpoints offers the first-endpoint chooser
-        XCTAssertTrue(workspace.centerFirstEndpointHeading.waitForExistence(timeout: 5),
+        XCTAssertTrue(workspace.centerFirstEndpointHeading.waitToExist(timeout: 5),
                       "Center pane should invite the first endpoint")
         XCTAssertTrue(workspace.centerAddEndpointCard.exists,
                       "The chooser should offer Add endpoint")
@@ -75,10 +75,10 @@ final class MimicUITests: MimicUITestCase {
                       "Add endpoint button should be in the navigator strip")
 
         // Toolbar buttons — inline when the centre column is wide, in "More actions" when narrow;
-        // `toolbarAction` opens that menu when it has to.
-        XCTAssertTrue(workspace.toggleInspectorButton.waitForExistence(timeout: 5),
+        // `revealToolbarAction` opens that menu when it has to, and leaves it open for the second.
+        XCTAssertTrue(workspace.revealInspectorToggle().waitToExist(timeout: 5),
                       "Toggle inspector button should be in toolbar")
-        XCTAssertTrue(workspace.toggleDrawerButton.exists,
+        XCTAssertTrue(workspace.revealRequestLogToggle().exists,
                       "Toggle drawer button should be in toolbar")
         workspace.closeToolbarMenu()
 
@@ -103,7 +103,7 @@ final class MimicUITests: MimicUITestCase {
         // The assertion begins polling the instant the edit is committed, so it catches the indicator
         // as it appears rather than racing one that has already cycled saving → saved → idle.
         workspace.addEndpointButton.click()
-        _ = newEndpointSheet.nameField.waitForExistence(timeout: 3)
+        _ = newEndpointSheet.nameField.waitToExist(timeout: 3)
         newEndpointSheet.nameField.click()
         newEndpointSheet.nameField.typeText("Trigger Save")
         newEndpointSheet.pathField.click()
@@ -154,11 +154,11 @@ final class MimicUITests: MimicUITestCase {
         XCTAssertTrue(workspace.assertVisible())
 
         let newProjectItem = app.menuItems["New Project\u{2026}"]
-        XCTAssertTrue(newProjectItem.waitForExistence(timeout: 5), "File ▸ New Project… should exist")
+        XCTAssertTrue(newProjectItem.waitToExist(timeout: 5), "File ▸ New Project… should exist")
         newProjectItem.click()
 
         XCTAssertTrue(
-            newProjectSheet.nameField.waitForExistence(timeout: 5),
+            newProjectSheet.nameField.waitToExist(timeout: 5),
             "New Project should open the new-project sheet"
         )
         newProjectSheet.cancelButton.click()
@@ -207,7 +207,7 @@ final class MimicUITests: MimicUITestCase {
         XCTAssertNotNil(recentElement, "Recent project should exist")
         recentElement!.rightClick()
 
-        XCTAssertTrue(app.menuItems["Open"].waitForExistence(timeout: 3),
+        XCTAssertTrue(app.menuItems["Open"].waitToExist(timeout: 3),
                       "Open menu item should exist")
         XCTAssertTrue(app.menuItems["Duplicate"].exists,
                       "Duplicate menu item should exist")
@@ -234,7 +234,7 @@ final class MimicUITests: MimicUITestCase {
         recentElement!.rightClick()
 
         let duplicateItem = app.menuItems["Duplicate"]
-        XCTAssertTrue(duplicateItem.waitForExistence(timeout: 3))
+        XCTAssertTrue(duplicateItem.waitToExist(timeout: 3))
         duplicateItem.click()
 
         let copyElement = welcome.findRecentProject(named: "Original (Copy)")
@@ -259,10 +259,10 @@ final class MimicUITests: MimicUITestCase {
         recentElement!.rightClick()
 
         let deleteItem = app.menuItems["Delete project…"]
-        XCTAssertTrue(deleteItem.waitForExistence(timeout: 3))
+        XCTAssertTrue(deleteItem.waitToExist(timeout: 3))
         deleteItem.click()
 
-        XCTAssertTrue(deleteConfirmation.deleteButton.waitForExistence(timeout: 3),
+        XCTAssertTrue(deleteConfirmation.deleteButton.waitToExist(timeout: 3),
                       "Delete confirmation dialog should appear")
         XCTAssertTrue(deleteConfirmation.keepButton.exists,
                       "Keep project button should exist in confirmation")
@@ -280,7 +280,7 @@ final class MimicUITests: MimicUITestCase {
         launchApp()
         welcome.newProjectButton.click()
 
-        XCTAssertTrue(newProjectSheet.portField.waitForExistence(timeout: 3))
+        XCTAssertTrue(newProjectSheet.portField.waitToExist(timeout: 3))
         newProjectSheet.nameField.click()
         newProjectSheet.nameField.typeText("Port Validation Test")
         XCTAssertTrue(newProjectSheet.createButton.isEnabled,
@@ -291,22 +291,20 @@ final class MimicUITests: MimicUITestCase {
         newProjectSheet.portField.typeText("99999")
         newProjectSheet.nameField.click()
 
-        let invalidPredicate = NSPredicate(format: "isEnabled == false")
-        expectation(for: invalidPredicate, evaluatedWith: newProjectSheet.createButton)
-        waitForExpectations(timeout: 3)
-        XCTAssertFalse(newProjectSheet.createButton.isEnabled,
-                       "Create button should disable for invalid port 99999")
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 3, pollInterval: 0.1) { !self.newProjectSheet.createButton.isEnabled },
+            "Create button should disable for invalid port 99999"
+        )
 
         newProjectSheet.portField.click()
         newProjectSheet.portField.typeKey("a", modifierFlags: .command)
         newProjectSheet.portField.typeText("3000")
         newProjectSheet.nameField.click()
 
-        let validPredicate = NSPredicate(format: "isEnabled == true")
-        expectation(for: validPredicate, evaluatedWith: newProjectSheet.createButton)
-        waitForExpectations(timeout: 3)
-        XCTAssertTrue(newProjectSheet.createButton.isEnabled,
-                      "Create button should re-enable for valid port 3000")
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 3, pollInterval: 0.1) { self.newProjectSheet.createButton.isEnabled },
+            "Create button should re-enable for valid port 3000"
+        )
     }
 
     // MARK: - 11a. Escape Dismisses Sheet
@@ -316,11 +314,11 @@ final class MimicUITests: MimicUITestCase {
         launchApp()
 
         welcome.newProjectButton.click()
-        XCTAssertTrue(newProjectSheet.nameField.waitForExistence(timeout: 3))
+        XCTAssertTrue(newProjectSheet.nameField.waitToExist(timeout: 3))
 
         app.typeKey(.escape, modifierFlags: [])
 
-        let sheetDismissed = newProjectSheet.nameField.waitForNonExistence(timeout: 3)
+        let sheetDismissed = newProjectSheet.nameField.waitToDisappear(timeout: 3)
         XCTAssertTrue(sheetDismissed, "Sheet should be dismissed after Escape")
         XCTAssertTrue(welcome.assertVisible(timeout: 3),
                       "Welcome screen should still be visible")
@@ -334,15 +332,16 @@ final class MimicUITests: MimicUITestCase {
 
         welcome.newProjectButton.click()
 
-        XCTAssertTrue(newProjectSheet.nameField.waitForExistence(timeout: 3))
+        XCTAssertTrue(newProjectSheet.nameField.waitToExist(timeout: 3))
 
         newProjectSheet.nameField.click()
         newProjectSheet.nameField.typeText("Return Test")
 
-        XCTAssertTrue(newProjectSheet.createButton.waitForExistence(timeout: 2))
-        let enabledPredicate = NSPredicate(format: "isEnabled == true")
-        expectation(for: enabledPredicate, evaluatedWith: newProjectSheet.createButton, handler: nil)
-        waitForExpectations(timeout: 3)
+        XCTAssertTrue(newProjectSheet.createButton.waitToExist(timeout: 2))
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 3, pollInterval: 0.1) { self.newProjectSheet.createButton.isEnabled },
+            "Create button should enable once the project has a name"
+        )
 
         app.typeKey(.return, modifierFlags: [])
 
@@ -357,7 +356,7 @@ final class MimicUITests: MimicUITestCase {
         launchApp()
 
         welcome.newProjectButton.click()
-        XCTAssertTrue(newProjectSheet.cancelButton.waitForExistence(timeout: 3),
+        XCTAssertTrue(newProjectSheet.cancelButton.waitToExist(timeout: 3),
                       "Cancel button should appear in the New Project sheet")
 
         newProjectSheet.cancelButton.click()
@@ -387,12 +386,12 @@ final class MimicUITests: MimicUITestCase {
 
         // Inspector should be visible by default
         let header = InspectorPage(app: app).header
-        XCTAssertTrue(header.waitForExistence(timeout: 5))
+        XCTAssertTrue(header.waitToExist(timeout: 5))
         workspace.toggleInspector()
-        XCTAssertTrue(header.waitForNonExistence(timeout: 5), "The inspector must actually close")
+        XCTAssertTrue(header.waitToDisappear(timeout: 5), "The inspector must actually close")
 
         workspace.toggleInspector()
-        XCTAssertTrue(header.waitForExistence(timeout: 5), "The inspector must actually reopen")
+        XCTAssertTrue(header.waitToExist(timeout: 5), "The inspector must actually reopen")
     }
 
     // MARK: - 14. Toggle Request Log Drawer
@@ -402,7 +401,7 @@ final class MimicUITests: MimicUITestCase {
         launchApp()
         createProjectViaUI(name: "Drawer Test")
 
-        XCTAssertTrue(workspace.toggleDrawerButton.waitForExistence(timeout: 5),
+        XCTAssertTrue(workspace.revealRequestLogToggle().waitToExist(timeout: 5),
                       "Toggle drawer button should exist")
 
         // Drawer should be visible by default with empty state
@@ -410,16 +409,16 @@ final class MimicUITests: MimicUITestCase {
                       "Drawer empty state should be visible")
 
         // Hide drawer
-        workspace.toggleDrawerButton.click()
+        workspace.revealRequestLogToggle().click()
 
         // Drawer empty state should disappear
-        let drawerHidden = workspace.drawerEmptyHeading.waitForNonExistence(timeout: 3)
+        let drawerHidden = workspace.drawerEmptyHeading.waitToDisappear(timeout: 3)
         XCTAssertTrue(drawerHidden, "Drawer should be hidden after toggle")
 
         // Show drawer again
-        workspace.toggleDrawerButton.click()
+        workspace.revealRequestLogToggle().click()
 
-        XCTAssertTrue(workspace.drawerEmptyHeading.waitForExistence(timeout: 3),
+        XCTAssertTrue(workspace.drawerEmptyHeading.waitToExist(timeout: 3),
                       "Drawer should reappear after toggle")
     }
 
@@ -432,7 +431,7 @@ final class MimicUITests: MimicUITestCase {
 
         workspace.addEndpointButton.click()
 
-        XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 3),
+        XCTAssertTrue(newEndpointSheet.nameField.waitToExist(timeout: 3),
                       "New endpoint sheet should appear")
 
         newEndpointSheet.nameField.click()
@@ -446,11 +445,11 @@ final class MimicUITests: MimicUITestCase {
         newEndpointSheet.createButton.click()
 
         // Endpoint should appear in sidebar — sidebar empty state should disappear
-        let sidebarEmpty = workspace.sidebarEmptyHeading.waitForNonExistence(timeout: 5)
+        let sidebarEmpty = workspace.sidebarEmptyHeading.waitToDisappear(timeout: 5)
         XCTAssertTrue(sidebarEmpty, "Sidebar empty state should disappear after adding endpoint")
 
         // Editor should appear in center pane
-        XCTAssertTrue(endpointEditor.pathLabel.waitForExistence(timeout: 5),
+        XCTAssertTrue(endpointEditor.pathLabel.waitToExist(timeout: 5),
                       "Endpoint path should be visible in editor")
     }
 
@@ -462,7 +461,7 @@ final class MimicUITests: MimicUITestCase {
         createProjectViaUI(name: "Edit Test")
         createEndpointViaUI(name: "Test Endpoint", path: "/api/test")
 
-        XCTAssertTrue(endpointEditor.statusCodeField.waitForExistence(timeout: 5),
+        XCTAssertTrue(endpointEditor.statusCodeField.waitToExist(timeout: 5),
                       "Status code field should be visible in editor")
 
         endpointEditor.statusCodeField.click()
@@ -481,22 +480,22 @@ final class MimicUITests: MimicUITestCase {
         createProjectViaUI(name: "Delete EP Test")
         createEndpointViaUI(name: "To Delete", path: "/api/delete-me")
 
-        XCTAssertTrue(endpointEditor.moreMenu.waitForExistence(timeout: 5))
+        XCTAssertTrue(endpointEditor.moreMenu.waitToExist(timeout: 5))
         endpointEditor.moreMenu.click()
 
         // Click "Delete endpoint…" from the more-options menu
         let deleteMenuItem = app.menuItems["Delete endpoint\u{2026}"]
-        XCTAssertTrue(deleteMenuItem.waitForExistence(timeout: 3))
+        XCTAssertTrue(deleteMenuItem.waitToExist(timeout: 3))
         deleteMenuItem.click()
 
         // Confirmation dialog
         let confirmSheet = app.sheets.firstMatch
-        XCTAssertTrue(confirmSheet.buttons["Delete endpoint"].waitForExistence(timeout: 3),
+        XCTAssertTrue(confirmSheet.buttons["Delete endpoint"].waitToExist(timeout: 3),
                       "Delete confirmation should appear")
         confirmSheet.buttons["Delete endpoint"].click()
 
         // Sidebar should return to empty state
-        XCTAssertTrue(workspace.sidebarEmptyHeading.waitForExistence(timeout: 5),
+        XCTAssertTrue(workspace.sidebarEmptyHeading.waitToExist(timeout: 5),
                       "Sidebar should show empty state after deleting last endpoint")
     }
 
@@ -519,7 +518,7 @@ final class MimicUITests: MimicUITestCase {
         XCTAssertNotNil(recentElement, "Project should appear in recents")
         recentElement!.click()
 
-        XCTAssertTrue(workspace.endpointPathText("/api/saved").waitForExistence(timeout: 5),
+        XCTAssertTrue(workspace.endpointPathText("/api/saved").waitToExist(timeout: 5),
                       "The exact saved endpoint must return after reopening")
     }
 
@@ -546,16 +545,16 @@ final class MimicUITests: MimicUITestCase {
 
         // Right-click the Default scenario to duplicate
         let defaultRow = inspector.findScenario(named: "Default")
-        XCTAssertTrue(defaultRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(defaultRow.waitToExist(timeout: 5))
         defaultRow.rightClick()
 
         let duplicateItem = app.menuItems["Duplicate"]
-        XCTAssertTrue(duplicateItem.waitForExistence(timeout: 3))
+        XCTAssertTrue(duplicateItem.waitToExist(timeout: 3))
         duplicateItem.click()
 
         // Duplicated scenario should appear
         let copyRow = inspector.findScenario(named: "Default (Copy)")
-        XCTAssertTrue(copyRow.waitForExistence(timeout: 5),
+        XCTAssertTrue(copyRow.waitToExist(timeout: 5),
                       "Duplicated scenario 'Default (Copy)' should appear in list")
     }
 
@@ -569,13 +568,13 @@ final class MimicUITests: MimicUITestCase {
 
         // Duplicate to get a second scenario
         let defaultRow = inspector.findScenario(named: "Default")
-        XCTAssertTrue(defaultRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(defaultRow.waitToExist(timeout: 5))
         defaultRow.rightClick()
 
         app.menuItems["Duplicate"].click()
 
         let copyRow = inspector.findScenario(named: "Default (Copy)")
-        XCTAssertTrue(copyRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(copyRow.waitToExist(timeout: 5))
 
         // The row's radio makes a scenario live; clicking the row itself only opens it.
         inspector.makeLive(named: "Default (Copy)")
@@ -597,28 +596,28 @@ final class MimicUITests: MimicUITestCase {
         // Navigator rows expose method, path and name as one accessible element.
         let usersPath = workspace.endpointPathText("/api/users")
         let postsPath = workspace.endpointPathText("/api/posts")
-        XCTAssertTrue(usersPath.waitForExistence(timeout: 5),
+        XCTAssertTrue(usersPath.waitToExist(timeout: 5),
                       "Get Users endpoint should be visible")
-        XCTAssertTrue(postsPath.waitForExistence(timeout: 5),
+        XCTAssertTrue(postsPath.waitToExist(timeout: 5),
                       "Get Posts endpoint should be visible")
 
         // The search field is pinned above the list, not a row inside it.
         // Address the field itself, not the filter's container. AppKit can flatten a container
         // identifier onto its children differently across macOS releases.
         let searchField = app.textFields["sidebar.filter.field"]
-        XCTAssertTrue(searchField.waitForExistence(timeout: 5),
+        XCTAssertTrue(searchField.waitToExist(timeout: 5),
                       "Search field should be available in sidebar")
         searchField.click()
         searchField.typeText("users")
-        XCTAssertTrue(usersPath.waitForExistence(timeout: 5))
-        XCTAssertTrue(postsPath.waitForNonExistence(timeout: 5),
+        XCTAssertTrue(usersPath.waitToExist(timeout: 5))
+        XCTAssertTrue(postsPath.waitToDisappear(timeout: 5),
                       "Filtering for users must actually remove the posts row")
 
         // After filtering, "No matches" should NOT appear (we should still have "users")
         let noMatches = app.staticTexts.matching(
             NSPredicate(format: "value CONTAINS %@ OR label CONTAINS %@", "No endpoints match", "No endpoints match")
         ).firstMatch
-        XCTAssertFalse(noMatches.waitForExistence(timeout: 2),
+        XCTAssertFalse(noMatches.waitToExist(timeout: 2),
                        "Should not show 'no matches' when filtering for 'users'")
 
         // Clear search — both should return
@@ -627,9 +626,9 @@ final class MimicUITests: MimicUITestCase {
         searchField.typeKey(.delete, modifierFlags: [])
 
         // After clearing, both endpoints should be visible again
-        XCTAssertTrue(usersPath.waitForExistence(timeout: 3),
+        XCTAssertTrue(usersPath.waitToExist(timeout: 3),
                       "/api/users should be visible after clearing search")
-        XCTAssertTrue(postsPath.waitForExistence(timeout: 3),
+        XCTAssertTrue(postsPath.waitToExist(timeout: 3),
                       "/api/posts should be visible after clearing search")
     }
 
@@ -645,10 +644,10 @@ final class MimicUITests: MimicUITestCase {
         createProjectViaUI(name: "Log Test", port: port)
         workspace.fillWindow()
 
-        XCTAssertTrue(requestLogDrawer.emptyHeading.waitForExistence(timeout: 5),
+        XCTAssertTrue(requestLogDrawer.emptyHeading.waitToExist(timeout: 5),
                       "Request log should show its empty state when there are no requests")
         let stoppedCommand = workspace.drawerCurlCommand
-        XCTAssertTrue(stoppedCommand.waitForExistence(timeout: 5),
+        XCTAssertTrue(stoppedCommand.waitToExist(timeout: 5),
                       "A stopped server's empty log should offer the command to try once it runs")
         let stoppedSpoken = "\(stoppedCommand.label)|\(stoppedCommand.value.map { String(describing: $0) } ?? "")"
         XCTAssertTrue(stoppedSpoken.contains("curl http://localhost:\(port)/"),
@@ -666,7 +665,7 @@ final class MimicUITests: MimicUITestCase {
         workspace.toggleServer()
         XCTAssertTrue(workspace.waitForServerURL(port: port), "The server should report its base URL once running")
         let command = workspace.drawerCurlCommand
-        XCTAssertTrue(command.waitForExistence(timeout: 5),
+        XCTAssertTrue(command.waitToExist(timeout: 5),
                       "A running server's empty log should still offer the command")
         let spoken = "\(command.label)|\(command.value.map { String(describing: $0) } ?? "")"
         XCTAssertTrue(spoken.contains("curl http://localhost:\(port)/"),
@@ -794,7 +793,7 @@ final class MimicUITests: MimicUITestCase {
 
         // Capturing has to *show* the journey, or the command reads as having done nothing.
         XCTAssertTrue(
-            app.staticTexts["journeyEditor.name"].waitForExistence(timeout: 5),
+            app.staticTexts["journeyEditor.name"].waitToExist(timeout: 5),
             "Creating the journey should open it in the editor"
         )
     }
@@ -824,7 +823,7 @@ final class MimicUITests: MimicUITestCase {
         await sendRequest(port: port, path: "/api/users", method: "POST", body: payload)
 
         XCTAssertTrue(
-            requestLogDrawer.firstLogRow.waitForExistence(timeout: 10),
+            requestLogDrawer.firstLogRow.waitToExist(timeout: 10),
             "The request should appear in the log once the server has answered it"
         )
         requestLogDrawer.firstLogRow.click()
@@ -836,7 +835,7 @@ final class MimicUITests: MimicUITestCase {
             "Selecting a logged request should open its detail beside the log"
         )
         XCTAssertTrue(requestDetail.shownPath().contains("/api/users"), "The detail should show the clicked request")
-        XCTAssertTrue(requestDetail.status.waitForExistence(timeout: 5), "Request detail should show the status")
+        XCTAssertTrue(requestDetail.status.waitToExist(timeout: 5), "Request detail should show the status")
         XCTAssertFalse(
             app.descendants(matching: .any).matching(identifier: "centerPane").firstMatch.exists,
             "The endpoint editor should give the column to the request"
@@ -853,7 +852,7 @@ final class MimicUITests: MimicUITestCase {
         // Request tab: the payload has to be visible.
         requestDetail.tab("Request").click()
         XCTAssertTrue(
-            requestDetail.requestBody.waitForExistence(timeout: 5),
+            requestDetail.requestBody.waitToExist(timeout: 5),
             "The Request tab should render the payload"
         )
         XCTAssertFalse(
@@ -862,18 +861,18 @@ final class MimicUITests: MimicUITestCase {
         )
 
         // Copying is the other half of "I found the request" — it must not silently do nothing.
-        XCTAssertTrue(requestDetail.copyCurlButton.waitForExistence(timeout: 5),
+        XCTAssertTrue(requestDetail.copyCurlButton.waitToExist(timeout: 5),
                       "Request detail should offer a copy-as-curl button")
         requestDetail.copyCurlButton.click()
         XCTAssertTrue(
-            requestDetail.copyConfirmation.waitForExistence(timeout: 3),
+            requestDetail.copyConfirmation.waitToExist(timeout: 3),
             "Copying should confirm it happened"
         )
 
         // Closing gives the column back to the editor, and the inspector to what it was showing.
         requestDetail.closeButton.click()
         XCTAssertTrue(
-            app.descendants(matching: .any).matching(identifier: "centerPane").firstMatch.waitForExistence(timeout: 5),
+            app.descendants(matching: .any).matching(identifier: "centerPane").firstMatch.waitToExist(timeout: 5),
             "Closing request detail should bring the endpoint editor back"
         )
         XCTAssertTrue(
@@ -906,6 +905,10 @@ final class MimicUITests: MimicUITestCase {
         createProjectViaUI(name: "Keyboard Test", port: port)
         createEndpointViaUI(name: "Users", path: "/api/users")
 
+        // Filled before Run/Stop is looked for, not after. A narrower window can leave Run/Stop in
+        // AppKit's own toolbar overflow, out of reach of `toggleServer`, which is how this test flaked
+        // four times on CI with "The toolbar should offer Run/Stop inline or in More actions".
+        workspace.fillWindow()
         workspace.toggleServer()
         XCTAssertTrue(
             workspace.waitForServerURL(port: port),
@@ -920,18 +923,23 @@ final class MimicUITests: MimicUITestCase {
             "Both requests should reach the log"
         )
 
-        // The click is what hands the table keyboard focus, so it is a precondition of the press
-        // rather than part of what is being tested.
-        workspace.fillWindow()
         let rows = requestLogDrawer.distinctRows(limit: 2)
         XCTAssertEqual(rows.count, 2, "Both requests should be listed as separate rows")
         XCTAssertTrue(UITestApp.waitUntil(timeout: 3) { rows[0].isHittable },
                       "The first log row should be reachable in the filled window")
+        // The click is what hands the table keyboard focus, so it is a precondition of the press
+        // rather than part of what is being tested.
         rows[0].click()
         XCTAssertTrue(
             requestDetail.waitForDetail(),
             "Clicking a row should open it beside the log"
         )
+        // Opening a request slides the inspector away, and in a window 1024pt wide (CI's screen, which
+        // every launch pins) the column changes arrangement partway through, from the request alone
+        // to the list beside it. Pressed once that has settled, the key tests the keyboard rather
+        // than the animation. Keeping the focus through that change is the app's job, and this test
+        // still fails if it does not.
+        UITestApp.waitForStableFrame(requestDetail.container, timeout: 3)
 
         // What the detail says *before* the press, so the assertion is that the selection moved
         // rather than that it landed on a particular path. Which row is second depends on the log's
@@ -943,13 +951,11 @@ final class MimicUITests: MimicUITestCase {
         // Polled by re-querying one identified element, never by walking the tree: an
         // `app.descendants(matching: .any)` carrying a `CONTAINS` predicate evaluates it against
         // every element in the window and times out inside XCUITest's own query evaluation, which
-        // is how this test first failed. `waitForExistence` on an element that already exists is
-        // the suite's idiom for spacing out a poll without `sleep`.
+        // is how this test first failed.
         var after = before
-        let deadline = Date().addingTimeInterval(5)
-        while Date() < deadline, after == before {
-            _ = requestDetail.path.waitForExistence(timeout: 0.3)
-            after = requestDetail.shownPath()
+        UITestApp.waitUntil(timeout: 5, pollInterval: 0.3) {
+            after = self.requestDetail.shownPath()
+            return after != before
         }
         XCTAssertNotEqual(
             after,
@@ -973,25 +979,26 @@ final class MimicUITests: MimicUITestCase {
         if !workspace.overflowMenu.exists { workspace.fillWindow() }
 
         // Import menu button should exist in toolbar
-        XCTAssertTrue(workspace.importMenuButton.waitForExistence(timeout: 5),
+        let importMenu = workspace.revealImportMenu()
+        XCTAssertTrue(importMenu.waitToExist(timeout: 5),
                       "Import menu button should exist in toolbar")
 
-        workspace.importMenuButton.click()
+        importMenu.click()
 
         // Click HAR import menu item
         let harMenuItem = workspace.importHARMenuItem
-        XCTAssertTrue(harMenuItem.waitForExistence(timeout: 3),
+        XCTAssertTrue(harMenuItem.waitToExist(timeout: 3),
                       "Import HAR menu item should exist")
         harMenuItem.click()
 
         // HAR import sheet should appear with empty state
-        XCTAssertTrue(harImportPage.emptyHeading.waitForExistence(timeout: 5),
+        XCTAssertTrue(harImportPage.emptyHeading.waitToExist(timeout: 5),
                       "HAR import should show empty state initially")
 
         // Dismiss via Escape
         app.typeKey(.escape, modifierFlags: [])
 
-        let sheetDismissed = harImportPage.emptyHeading.waitForNonExistence(timeout: 3)
+        let sheetDismissed = harImportPage.emptyHeading.waitToDisappear(timeout: 3)
         XCTAssertTrue(sheetDismissed, "HAR import sheet should dismiss on escape")
     }
 
@@ -1004,22 +1011,22 @@ final class MimicUITests: MimicUITestCase {
         workspace.compactWindow()
         if !workspace.overflowMenu.exists { workspace.fillWindow() }
 
-        workspace.importMenuButton.click()
+        workspace.revealImportMenu().click()
 
         // Click OpenAPI import menu item
         let openAPIMenuItem = workspace.importOpenAPIMenuItem
-        XCTAssertTrue(openAPIMenuItem.waitForExistence(timeout: 3),
+        XCTAssertTrue(openAPIMenuItem.waitToExist(timeout: 3),
                       "Import OpenAPI menu item should exist")
         openAPIMenuItem.click()
 
         // OpenAPI import sheet should appear with empty state
-        XCTAssertTrue(openAPIImportPage.emptyHeading.waitForExistence(timeout: 5),
+        XCTAssertTrue(openAPIImportPage.emptyHeading.waitToExist(timeout: 5),
                       "OpenAPI import should show empty state initially")
 
         // Dismiss via Escape
         app.typeKey(.escape, modifierFlags: [])
 
-        let sheetDismissed = openAPIImportPage.emptyHeading.waitForNonExistence(timeout: 3)
+        let sheetDismissed = openAPIImportPage.emptyHeading.waitToDisappear(timeout: 3)
         XCTAssertTrue(sheetDismissed, "OpenAPI import sheet should dismiss on escape")
     }
 
@@ -1065,7 +1072,7 @@ final class MimicUITests: MimicUITestCase {
         createProjectViaUI(name: "Status Persist Test")
         createEndpointViaUI(name: "Auth Endpoint", path: "/api/auth")
 
-        XCTAssertTrue(endpointEditor.statusCodeField.waitForExistence(timeout: 5),
+        XCTAssertTrue(endpointEditor.statusCodeField.waitToExist(timeout: 5),
                       "Status code field should be visible in editor")
 
         endpointEditor.statusCodeField.click()
@@ -1099,11 +1106,11 @@ final class MimicUITests: MimicUITestCase {
         XCTAssertTrue(workspace.assertVisible())
 
         let endpointPath = workspace.endpointPathText("/api/auth")
-        XCTAssertTrue(endpointPath.waitForExistence(timeout: 5),
+        XCTAssertTrue(endpointPath.waitToExist(timeout: 5),
                       "Persisted endpoint should be visible in the sidebar after reopening")
         endpointPath.click()
 
-        XCTAssertTrue(endpointEditor.statusCodeField.waitForExistence(timeout: 5))
+        XCTAssertTrue(endpointEditor.statusCodeField.waitToExist(timeout: 5))
         XCTAssertEqual(endpointEditor.statusCodeField.value as? String, "401",
                        "Reopened endpoint should preserve the edited 401 status code")
     }
@@ -1121,16 +1128,16 @@ final class MimicUITests: MimicUITestCase {
         createEndpointViaUI(name: "Relaunch endpoint", path: endpointPath)
         let journeys = JourneysNavigatorPage(app: app)
         WorkspaceShellPage(app: app).journeysTab.click()
-        XCTAssertTrue(journeys.addButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(journeys.addButton.waitToExist(timeout: 5))
         journeys.addButton.click()
-        XCTAssertTrue(journeys.newEmptyMenuItem.waitForExistence(timeout: 5))
+        XCTAssertTrue(journeys.newEmptyMenuItem.waitToExist(timeout: 5))
         journeys.newEmptyMenuItem.click()
         let newJourney = NewJourneySheetPage(app: app)
-        XCTAssertTrue(newJourney.nameField.waitForExistence(timeout: 5))
+        XCTAssertTrue(newJourney.nameField.waitToExist(timeout: 5))
         newJourney.nameField.click()
         newJourney.nameField.typeText(journeyName)
         newJourney.createButton.click()
-        XCTAssertTrue(journeys.journeyRow(named: journeyName).waitForExistence(timeout: 5))
+        XCTAssertTrue(journeys.journeyRow(named: journeyName).waitToExist(timeout: 5))
         waitForAsyncSave()
 
         app.terminate()
@@ -1140,12 +1147,13 @@ final class MimicUITests: MimicUITestCase {
         // a second reset would erase the very project this fresh-process check must recover.
         app.launchArguments.removeAll { $0 == "-MimicResetForTesting" }
         XCTAssertTrue(
-            UITestApp.launchAndBringToForeground(app) { self.workspace.assertVisible(timeout: 1) },
+            // A timeout of 0 looks once: the launch loop does the polling.
+            UITestApp.launchAndBringToForeground(app) { self.workspace.assertVisible(timeout: 0) },
             "A new app process should restore the project from the test database"
         )
 
         let title = workspace.projectTitle
-        XCTAssertTrue(title.waitForExistence(timeout: 5),
+        XCTAssertTrue(title.waitToExist(timeout: 5),
                       "The restored workspace should name its project\n\(app.toolbars.firstMatch.debugDescription)")
         XCTAssertTrue(
             title.label == projectName || (title.value as? String) == projectName,
@@ -1153,12 +1161,12 @@ final class MimicUITests: MimicUITestCase {
         )
         workspace.showSidebarIfNeeded()
         XCTAssertTrue(
-            workspace.endpointPathText(endpointPath).waitForExistence(timeout: 5),
+            workspace.endpointPathText(endpointPath).waitToExist(timeout: 5),
             "The endpoint should survive closing and reopening the SQLite database"
         )
         WorkspaceShellPage(app: app).journeysTab.click()
         XCTAssertTrue(
-            journeys.journeyRow(named: journeyName).waitForExistence(timeout: 5),
+            journeys.journeyRow(named: journeyName).waitToExist(timeout: 5),
             "The journey should survive closing and reopening the SQLite database"
         )
     }

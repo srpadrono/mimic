@@ -246,7 +246,12 @@ public struct WorkspaceDetailColumn<JumpBar: View, Center: View, RequestLog: Vie
                     minimumPrimaryThickness: metrics.minimumCentreHeight,
                     minimumSecondaryThickness: metrics.minimumRequestLogHeight,
                     defaultSecondaryThickness: metrics.defaultRequestLogHeight,
-                    identifier: "requestLog"
+                    identifier: "requestLog",
+                    // Named on the pane's AppKit view, not on `center`. The `sidebar` and
+                    // `inspector` way, `.contain` and an identifier on the content, fails when the
+                    // content is a single element, as the journey editor's list is: SwiftUI merges
+                    // the two into it, and the list's own `journeyEditor.stepList` was replaced.
+                    primaryAccessibilityIdentifier: "centerPane"
                 ) {
                     center
                         // Anchored to the top, not centred. An editor taller than its pane is
@@ -257,8 +262,6 @@ public struct WorkspaceDetailColumn<JumpBar: View, Center: View, RequestLog: Vie
                         // is clipped at the bottom instead of sliding the header under the jump bar.
                         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
                         .clipped()
-                        .accessibilityElement(children: .contain)
-                        .accessibilityIdentifier("centerPane")
                 } secondary: {
                     requestLog
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

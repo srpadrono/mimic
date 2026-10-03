@@ -96,5 +96,20 @@ struct WorkspaceToolbarLayoutTests {
         #expect(WorkspaceToolbarLayout.narrow.projectIdentityMaximumWidth >= 96)
         #expect(WorkspaceToolbarLayout.minimal.projectIdentityMaximumWidth >= 96)
     }
+
+    /// The identity and status items are keyed by the stage so AppKit measures new ones when it
+    /// changes. Two stages sharing a key would share an item, and after an animated inspector
+    /// toggle between them the address well spilled over the project name at the old width.
+    @Test("Every toolbar stage keys its width-dependent items apart")
+    func everyStageHasItsOwnItemKey() {
+        let stages: [WorkspaceToolbarLayout] = [.expanded, .compactSummary, .overflow, .narrow, .minimal]
+        let keys = stages.map(\.itemKey)
+        #expect(Set(keys).count == stages.count, "Stages share an item key: \(keys)")
+        #expect(keys.allSatisfy { !$0.isEmpty })
+        // Hiding the inspector in CI's filled 1024pt window, then in the 900pt compact one: the two
+        // toggles the layout audit caught.
+        #expect(WorkspaceToolbarLayout(centerWidth: 444).itemKey != WorkspaceToolbarLayout(centerWidth: 744).itemKey)
+        #expect(WorkspaceToolbarLayout(centerWidth: 326).itemKey != WorkspaceToolbarLayout(centerWidth: 626).itemKey)
+    }
 }
 

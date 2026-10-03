@@ -24,7 +24,7 @@ This is the repository guidance for coding agents. `CLAUDE.md` delegates here. R
 
 **View or navigation:** change the view in its section module and check it in the `MimicGallery` app against its artboard; add a gallery entry for a new view or state; its snapshot in `Tests/DesignFidelityTests/Snapshots/` is the size and colour check, recorded by CI ([Test gates](CONTRIBUTING.md#test-gates)). Give interactive controls accessibility identifiers and labels; cover changed happy, error, empty, and edge flows with page-object XCUITests, and add new test methods to a shard in `Scripts/test_selection.json`. Keep test hooks behind `#if DEBUG`. Use an isolated test database and defaults suite; never let a UI test open or delete the developer's `mimic.sqlite`.
 
-**Test fixtures:** write expected external inputs as literals, independent of the function under test. Ask whether reverting that function would make the test fail. Use Swift Testing for new unit tests and XCTest for UI tests. UI tests wait for state with `waitForExistence(timeout:)` or `UITestApp.waitForAny`, not sleeps.
+**Test fixtures:** write expected external inputs as literals, independent of the function under test. Ask whether reverting that function would make the test fail. Use Swift Testing for new unit tests and XCTest for UI tests. UI tests wait for state with `waitToExist(timeout:)`/`waitToDisappear(timeout:)`, `UITestApp.waitUntil` or `UITestApp.waitForAny`, never sleeps or XCTest's own waits (`Scripts/check_house_rules.sh` bans them); clicks that open a sheet, menu or popover use `UITestApp.click(_:expecting:)`, and value pickers use `UITestApp.chooseMenuOption`.
 
 ## Project rules
 

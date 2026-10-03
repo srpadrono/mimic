@@ -8,8 +8,9 @@ import FeatureSupport
 
 /// Test-only support for deterministic XCUITest launches.
 ///
-/// Under UI testing the app must (a) start from a clean persisted state and (b) reliably bring its
-/// window to the foreground in a headless CI environment. This lives behind `#if DEBUG` so none of
+/// Under UI testing the app must (a) start from a clean persisted state, window frame included,
+/// (b) reliably bring its window to the foreground in a headless CI environment, and (c) lay its
+/// window out on the same screen as CI whatever Mac it runs on. This lives behind `#if DEBUG` so none of
 /// this scaffolding is compiled into Release builds — the shipping product never carries it.
 ///
 /// Activation is gated on the `-MimicResetForTesting` launch argument or the `MIMIC_DEFAULTS_SUITE`
@@ -41,7 +42,8 @@ enum UITestSupport {
 
     /// The window sizes UI tests work at: the screen's whole visible frame, a compact width that
     /// folds the toolbar while keeping all three panels, and the two smallest the window allows,
-    /// which the layout audit (`LayoutAuditUITests`) sweeps.
+    /// which the layout audit (`LayoutAuditUITests`) sweeps. The screen is the pinned one
+    /// (``ScreenGeometry``), so each size is the same on every Mac as on CI.
     enum TestWindowSize {
         case fill
         case compact
@@ -60,8 +62,10 @@ enum UITestSupport {
     /// items are rebuilt while it opens, and a drag stops at whatever minimum the panels allow.
     static func resizeMainWindow(to size: TestWindowSize) {
         guard let window = NSApp.mainWindow ?? NSApp.keyWindow ?? NSApp.windows.first(where: \.isVisible),
-              let visible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+              let visible = ScreenGeometry.visibleFrame(of: window.screen ?? NSScreen.main)
         else { return }
+        // A resize is exactly what AppKit would record for the next launch to reopen at.
+        stopFrameAutosave(window)
         var frame = visible
         switch size {
         case .fill:
@@ -86,6 +90,92 @@ enum UITestSupport {
     private static func minimumFrameSize(of window: NSWindow) -> CGSize {
         let content = window.frameRect(forContentRect: NSRect(origin: .zero, size: window.contentMinSize)).size
         return CGSize(width: max(window.minSize.width, content.width, 1), height: max(window.minSize.height, content.height, 1))
+    }
+
+    // MARK: - The same screen and the same first frame as CI
+
+    /// Set to `<width>x<height>`, in points, to pin the screen every window size is taken from.
+    /// The UI test harness sets CI's visible frame, `1024x677`, on every launch (`UITestEnvironment`
+    /// in `MimicUITests`, which spells this key itself because the runner links no app code).
+    static let pinnedScreenEnvironmentKey = "MIMIC_UITEST_SCREEN"
+
+    /// The size this launch pinned the screen to, or `nil`; ``ScreenGeometry`` applies it.
+    static let pinnedScreenSize: CGSize? = UITestSupport.pinnedScreenSize(
+        environment: ProcessInfo.processInfo.environment
+    )
+
+    /// The size `environment` pins the screen to: only on a UI test launch, and only a well-formed
+    /// one. Gated like every other hook here, so a stray variable cannot shrink a developer's
+    /// windows. A malformed value pins nothing, the same as no value.
+    static func pinnedScreenSize(
+        environment: [String: String],
+        arguments: [String] = ProcessInfo.processInfo.arguments
+    ) -> CGSize? {
+        guard isRunningUITests(environment: environment, arguments: arguments),
+              let value = environment[pinnedScreenEnvironmentKey]
+        else { return nil }
+        let parts = value.lowercased().split(separator: "x", omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              let width = Double(parts[0]), let height = Double(parts[1]),
+              width.isFinite, height.isFinite, width > 0, height > 0
+        else { return nil }
+        return CGSize(width: width, height: height)
+    }
+
+    /// Stops AppKit restoring this window's frame at the next launch and recording it for one.
+    ///
+    /// AppKit keeps where each window was left under `NSWindow Frame <autosave name>` in the app's
+    /// `.standard` defaults, outside the suite a reset clears. Every UI test launch therefore
+    /// reopened at the frame the previous test ended on, and `WindowRoleFrame` then recorded that
+    /// frame as the workspace's. After the narrowest-window test, the next test's workspace opened
+    /// 680pt wide, too narrow for the inspector, which hid itself; the test failed on CI and passed
+    /// whenever it ran alone. A run also shares its bundle identifier with the developer's own
+    /// Mimic, so every resize a test made became the frame their real window next opened at. An
+    /// empty name records and restores nothing.
+    ///
+    /// Idempotent and cheap, so each view that meets the window calls it before it reads or
+    /// moves the frame, whichever of them meets the window first.
+    static func stopFrameAutosave(_ window: NSWindow) {
+        guard isRunningUITests else { return }
+        if !window.frameAutosaveName.isEmpty { _ = window.setFrameAutosaveName("") }
+        if window.isRestorable { window.isRestorable = false }
+    }
+
+    /// Starts a UI test window where a clean CI runner's starts: the whole visible frame of the
+    /// pinned screen, with frame autosave off.
+    ///
+    /// Called once per window, by `WindowRoleFrame` just before it first reads the frame, so the
+    /// welcome screen centres inside the pinned frame and records it as the workspace's: the first
+    /// project then opens filling the pinned screen (1024×677), as it does on CI. A relaunch that
+    /// keeps the run's store, and so opens straight onto a project, starts its workspace at the
+    /// same frame rather than wherever the previous process left it.
+    static func prepareWindowForTesting(_ window: NSWindow) {
+        guard isRunningUITests else { return }
+        stopFrameAutosave(window)
+        guard let visible = ScreenGeometry.visibleFrame(of: window.screen ?? NSScreen.main),
+              window.frame != visible
+        else { return }
+        window.setFrame(visible, display: true, animate: false)
+    }
+
+    /// What AppKit names every frame it autosaves in the defaults: `NSWindow Frame <autosave name>`.
+    static let autosavedWindowFramePrefix = "NSWindow Frame "
+
+    /// Removes every window frame AppKit autosaved in `defaults`, and nothing else.
+    ///
+    /// ``stopFrameAutosave(_:)`` keeps a run from writing new frames; this clears the ones already
+    /// there, which earlier runs wrote before it existed, so the window has nothing stale to reopen
+    /// at even before `WindowRoleFrame` moves it. The cost is that the developer's own Mimic, which
+    /// shares the domain, next opens at its default frame rather than where they left it.
+    ///
+    /// `defaults` only removes keys in its own domain, so a suite in a unit test cannot reach the
+    /// app's. Called with `.standard` only from ``resetAppIfNeeded()``, never from the injectable
+    /// ``resetApp(contextProvider:)`` that unit tests call: their host is the app, so its `.standard`
+    /// is the developer's real one.
+    static func removeAutosavedWindowFrames(from defaults: UserDefaults) {
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(autosavedWindowFramePrefix) {
+            defaults.removeObject(forKey: key)
+        }
     }
 
     static var isRunningUITests: Bool {
@@ -242,10 +332,15 @@ enum UITestSupport {
         )
     }
 
+    /// The reset a UI test launch runs, once, before `AppState` opens the store and before any
+    /// window exists: ``resetApp(contextProvider:)``, then the autosaved window frames
+    /// (``removeAutosavedWindowFrames(from:)``), so the first window cannot reopen at a frame an
+    /// earlier test left.
     static func resetAppIfNeeded() {
         guard hasResetCurrentProcess == false else { return }
         hasResetCurrentProcess = true
         resetApp()
+        removeAutosavedWindowFrames(from: .standard)
     }
 
     /// The store a UI test run opens, and the only one a reset may delete.
@@ -321,10 +416,14 @@ enum UITestSupport {
     ///   does **not** arm the reset. So the override is neither necessary nor sufficient: it is the
     ///   UI-test gate that keeps a developer's machine safe, and believing otherwise is how somebody
     ///   would come to "simplify" that gate away.
-    /// - **`.standard` is not touched at all.** It never needed to be: `AppState.resolveDefaults`
+    /// - **`.standard` is not touched here at all.** It never needed to be: `AppState.resolveDefaults`
     ///   already routes a test run to the `MIMIC_DEFAULTS_SUITE` suite, so the recents list and the
     ///   panel layout a test sees are the suite's, and wiping `.standard` only ever damaged the
-    ///   developer's real window arrangement.
+    ///   developer's real window arrangement. The one thing a UI test launch does remove from it is
+    ///   AppKit's autosaved window frames, and that is ``resetAppIfNeeded()``'s second step rather
+    ///   than this function's, so the unit tests that call this can never reach the developer's
+    ///   domain. Those frames were the one piece of state a run left for the next test to inherit;
+    ///   ``stopFrameAutosave(_:)`` explains how.
     static func resetApp(
         knownTestSuites: [String],
         databaseURL: URL?,

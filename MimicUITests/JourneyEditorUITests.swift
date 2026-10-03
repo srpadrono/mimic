@@ -12,7 +12,7 @@ import XCTest
 /// "the app is broken" rather than "the tree is shaped differently than I guessed".
 ///
 /// It never *skips*: when nothing matches, the last branch returns a query that resolves to nothing,
-/// so the caller's `waitForExistence` fails loudly instead of the test quietly passing.
+/// so the caller's `waitToExist` fails loudly instead of the test quietly passing.
 @MainActor
 private func resolveJourneyControl(
     _ app: XCUIApplication,
@@ -118,9 +118,10 @@ extension JourneysNavigatorPage {
     /// Not `journeyRow(named:)`: that matches *any* element whose label contains the name, and the
     /// editor header's `journeyEditor.name` carries the same string — so with a journey selected it
     /// can resolve to the centre pane instead of the sidebar, which is exactly the state every test
-    /// below is in. Pinning the row identifier's prefix as well makes it the row or nothing.
+    /// below is in. Pinning the row identifier's prefix as well makes it the row or nothing, and
+    /// searching only the navigator's pane keeps the predicate off the rest of the window.
     func row(named name: String) -> XCUIElement {
-        app.descendants(matching: .any)
+        app.container(named: "sidebar").descendants(matching: .any)
             .matching(NSPredicate(
                 format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@",
                 "journeys.row.",
@@ -133,7 +134,7 @@ extension JourneysNavigatorPage {
     /// ", step 2 of 5". The design's footer has no indicator of its own; Journeys ▸ Show Active
     /// Journey reveals the row (`showActiveJourneyFromMenu`).
     var activeJourneyIndicator: XCUIElement {
-        app.descendants(matching: .any)
+        app.container(named: "sidebar").descendants(matching: .any)
             .matching(NSPredicate(
                 format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "journeys.row.", ", active"
             ))
@@ -144,7 +145,7 @@ extension JourneysNavigatorPage {
     func showActiveJourneyFromMenu(file: StaticString = #filePath, line: UInt = #line) {
         app.menuBars.menuBarItems["Journeys"].click()
         let item = app.menuItems["Show Active Journey"].firstMatch
-        guard item.waitForExistence(timeout: 5) else {
+        guard item.waitToExist(timeout: 5) else {
             XCTFail("Journeys ▸ Show Active Journey should be listed", file: file, line: line)
             UITestApp.dismissAnyOpenMenu(in: app)
             return
@@ -294,14 +295,14 @@ final class JourneyEditorUITests: MimicUITestCase {
     @MainActor
     private func showJourneysNavigator() {
         let menuBar = app.menuBars.firstMatch
-        XCTAssertTrue(menuBar.waitForExistence(timeout: 5), "Menu bar should exist")
+        XCTAssertTrue(menuBar.waitToExist(timeout: 5), "Menu bar should exist")
 
         let journeysMenu = menuBar.menuBarItems["Journeys"]
-        XCTAssertTrue(journeysMenu.waitForExistence(timeout: 5), "Journeys menu should exist")
+        XCTAssertTrue(journeysMenu.waitToExist(timeout: 5), "Journeys menu should exist")
         journeysMenu.click()
 
         let showItem = app.menuItems["Show Journeys"].firstMatch
-        XCTAssertTrue(showItem.waitForExistence(timeout: 5), "Show Journeys item should exist")
+        XCTAssertTrue(showItem.waitToExist(timeout: 5), "Show Journeys item should exist")
         showItem.click()
 
         XCTAssertTrue(journeys.waitUntilVisible(), "Journeys navigator should appear in the sidebar")
@@ -329,11 +330,11 @@ final class JourneyEditorUITests: MimicUITestCase {
         )
 
         let row = templatePicker.template(id)
-        XCTAssertTrue(row.waitForExistence(timeout: 5), "Template \(id) should be listed")
+        XCTAssertTrue(row.waitToExist(timeout: 5), "Template \(id) should be listed")
         row.click()
 
         XCTAssertTrue(
-            templatePicker.activateToggle.waitForExistence(timeout: 3),
+            templatePicker.activateToggle.waitToExist(timeout: 3),
             "The picker should offer to activate the journey it adds"
         )
         XCTAssertEqual(
@@ -352,37 +353,55 @@ final class JourneyEditorUITests: MimicUITestCase {
 
         templatePicker.addButton.click()
         XCTAssertTrue(
-            templatePicker.addButton.waitForNonExistence(timeout: 5),
+            templatePicker.addButton.waitToDisappear(timeout: 5),
             "The picker should close once the journey is added"
         )
     }
 
     @MainActor
     private func createEmptyJourney(named name: String) {
-        journeys.addButton.click()
+        // The same retrying helper as `addTemplate`, for the add menu's other item. A click that the
+        // moving menu sent to "Add journey from template" opens the template picker instead, so
+        // that is closed before the menu is opened again.
         XCTAssertTrue(
-            journeys.newEmptyMenuItem.waitForExistence(timeout: 5),
-            "The add menu should offer an empty journey"
+            UITestApp.chooseFromSubmenu(
+                in: app,
+                parent: journeys.addButton,
+                item: journeys.newEmptyMenuItem,
+                thenAwait: newJourneySheet.nameField,
+                reopenMenu: {
+                    let cancel = self.templatePicker.cancelButton
+                    if cancel.exists {
+                        cancel.click()
+                        _ = cancel.waitToDisappear(timeout: 3)
+                    }
+                }
+            ),
+            "The add menu should offer an empty journey, and it should open the new journey sheet"
         )
-        journeys.newEmptyMenuItem.click()
-
-        XCTAssertTrue(newJourneySheet.nameField.waitForExistence(timeout: 5), "New journey sheet should open")
         newJourneySheet.nameField.click()
         newJourneySheet.nameField.typeText(name)
         newJourneySheet.createButton.click()
 
         XCTAssertTrue(
-            journeys.addStepButton.waitForExistence(timeout: 10),
+            journeys.addStepButton.waitToExist(timeout: 10),
             "The editor should open on the journey that was just created"
         )
     }
 
     /// Opens the step sheet from the editor header.
+    ///
+    /// Through `UITestApp.click(_:expecting:)`, which waits for "Add step" to be under the pointer
+    /// and still before clicking it. On CI an always-visible scroll bar once lay across the button and
+    /// took the click, and all this said was that the sheet had not opened; now the result bundle
+    /// says the button was not hittable, and the message says where it was.
     @MainActor
     private func openStepSheet() {
-        XCTAssertTrue(journeys.addStepButton.waitForExistence(timeout: 10), "Add step should be offered")
-        journeys.addStepButton.click()
-        XCTAssertTrue(stepSheet.pathField.waitForExistence(timeout: 5), "The step sheet should open")
+        XCTAssertTrue(journeys.addStepButton.waitToExist(timeout: 10), "Add step should be offered")
+        XCTAssertTrue(
+            UITestApp.click(journeys.addStepButton, expecting: { self.stepSheet.pathField.exists }),
+            "The step sheet should open — Add step is \(describe(journeys.addStepButton))"
+        )
     }
 
     // MARK: - Interaction helpers
@@ -442,7 +461,7 @@ final class JourneyEditorUITests: MimicUITestCase {
     /// Replaces a field's contents rather than appending to them.
     @MainActor
     private func replaceText(in field: XCUIElement, with text: String) {
-        XCTAssertTrue(field.waitForExistence(timeout: 5), "A field being typed into should be on screen")
+        XCTAssertTrue(field.waitToExist(timeout: 5), "A field being typed into should be on screen")
         field.click()
         field.typeKey("a", modifierFlags: .command)
         field.typeText(text)
@@ -469,126 +488,40 @@ final class JourneyEditorUITests: MimicUITestCase {
         // ⌥⌘L rather than the toolbar toggle: in a narrow window the toggle is an item of the
         // "More actions" menu, and reaching it would leave that menu open when there is nothing
         // to hide.
-        guard workspace.drawerEmptyHeading.waitForExistence(timeout: 5) else { return }
+        guard workspace.drawerEmptyHeading.waitToExist(timeout: 5) else { return }
         app.typeKey("l", modifierFlags: [.command, .option])
-        _ = workspace.drawerEmptyHeading.waitForNonExistence(timeout: 3)
-    }
-
-    /// A menu item matched the way AppKit actually names one: by **title**.
-    ///
-    /// `label` is not it. CI printed the element this suite kept catching —
-    /// `MenuItem, {{6.0, 224.0}, {251.0, 24.0}}, identifier: '_restartNowRequested:', title:
-    /// 'Restart'` — and an XCUITest element description prints `label:` when there is one. There was
-    /// none. So `matching(NSPredicate(format: "label == %@", …))` matches *no* menu item in this
-    /// app, which is why the scoped query "found nothing" and the loose one found nothing either,
-    /// and why `app.menuItems["POST"]` — a subscript, which matches identifier *or* title — has kept
-    /// working in `MimicUITestCase.selectMethod` the whole time. All three attributes are asked for
-    /// here so neither spelling can be the one that decides.
-    private func menuItemTitled(_ option: String) -> NSPredicate {
-        NSPredicate(
-            format: "identifier == %@ OR title == %@ OR label == %@",
-            option, option, option
-        )
-    }
-
-    /// One option of an open pop-up menu — the *picker's* option, never the menu bar's.
-    ///
-    /// **Where an open pop-up's menu really lives: app-wide, beside the menu bar's, not under the
-    /// pop-up button.** Scoping the query to `picker.descendants` was a guess and it was wrong; the
-    /// scoped branch is kept only because a match under the button cannot possibly be a menu-bar
-    /// item, and it costs one query when it misses.
-    ///
-    /// Which makes disambiguation the whole job, because the menu bar's items are in the tree
-    /// whether or not their menu is open. "Restart" is the on-completion picker's second option and
-    /// also the title of the Apple menu's `_restartNowRequested:` item. **Hittability is what
-    /// separates them**, and it is evidence rather than theory in both directions: that Apple item
-    /// failed a click with "Not hittable" while its menu was closed, and `selectMethod` clicks the
-    /// method pop-up's own items successfully on every run of the request-log suite. A non-hittable
-    /// homonym is therefore never returned — clicking the Apple menu's Restart is not a failure a
-    /// suite recovers from.
-    @MainActor
-    private func openMenuItem(titled option: String, in picker: XCUIElement) -> XCUIElement? {
-        let scoped = picker.descendants(matching: .menuItem)
-            .matching(menuItemTitled(option))
-            .firstMatch
-        if scoped.exists, scoped.isHittable { return scoped }
-
-        let loose = app.menuItems.matching(menuItemTitled(option))
-        for index in 0..<loose.count {
-            let candidate = loose.element(boundBy: index)
-            if candidate.exists, candidate.isHittable { return candidate }
-        }
-        return nil
-    }
-
-    /// What the tree says about the menus on screen, for a failure that has to name what it saw.
-    ///
-    /// Bounded: the menu bar alone contributes a few hundred items, and every attribute read is a
-    /// query. Only the hittable ones are described, because those are the open menu's — the same
-    /// discriminator ``openMenuItem(titled:in:)`` selects on, so a failure shows exactly the set
-    /// that was searched.
-    @MainActor
-    private func openMenuDescription() -> String {
-        let items = app.menuItems
-        let total = items.count
-        var described: [String] = []
-        for index in 0..<min(total, 60) where described.count < 12 {
-            let item = items.element(boundBy: index)
-            guard item.exists, item.isHittable else { continue }
-            described.append("\"\(item.title)\"/\"\(item.label)\"")
-        }
-        let list = described.isEmpty ? "none of them hittable" : described.joined(separator: ", ")
-        return "\(app.menus.count) menus and \(total) menu items in the tree; open ones: \(list)"
-    }
-
-    /// The characters that pick `option` out of an open menu by typing.
-    ///
-    /// The first word only. An open `NSMenu` matches what has been typed against item titles as a
-    /// prefix, and a **space activates whatever is highlighted** — so typing "Strict sequence" whole
-    /// would commit on the space and type "sequence" into whatever is behind the menu. Every option
-    /// this suite picks is uniquely identified by its first word within its own menu ("Per" /
-    /// "Strict", "Stop" / "Restart", "Use" / "404", and the HTTP methods, where "PO" already
-    /// separates POST from PUT and PATCH).
-    private func typeSelectPrefix(of option: String) -> String {
-        guard let firstWord = option.split(separator: " ").first else { return option }
-        return String(firstWord)
+        _ = workspace.drawerEmptyHeading.waitToDisappear(timeout: 3)
     }
 
     /// Opens a pop-up picker, chooses one of its options, and proves the choice took.
     ///
     /// A SwiftUI `Picker` realizes as a pop-up button, so the menu has to be opened before its items
-    /// can be clicked — the same reason `MimicUITestCase.selectMethod` clicks before it queries.
+    /// can be clicked. The opening, the click and the keyboard fallback are
+    /// `UITestApp.chooseMenuOption`'s, shared with every other value picker in the suite. It began
+    /// here: in CI run 37147249690 XCUITest looked the unscripted-requests picker's "404" up twice,
+    /// hovered it at y 420 and clicked y 396, the row above, which held the value the picker
+    /// already had.
     ///
     /// The assertion is on the **picker's own value afterwards**, not on having found something to
     /// click. That is the fact each caller is here for — the journey remembers the choice — and it
-    /// holds however the option was reached, which is what lets the keyboard stand in when the tree
-    /// will not name the menu: an open menu selects by typed prefix and commits on Return, no
-    /// element lookup involved. Typing is safe in both places this is called from because neither
-    /// has a default button armed: the step sheet's save stays disabled until a path is typed, and
-    /// the behaviour band is in the main window, which has none.
+    /// holds however the option was reached, which is what lets the keyboard stand in on the last
+    /// attempt: an open menu selects by typed prefix and commits on Return, no element lookup
+    /// involved. Typing is safe in both places this is called from because neither has a default
+    /// button armed: the step sheet's save stays disabled until a path is typed, and the behaviour
+    /// band is in the main window, which has none. Every option picked here is told apart by its
+    /// first word within its own menu ("Per" / "Strict", "Stop" / "Restart", "Use" / "404", and the
+    /// HTTP methods, where "POST" is typed whole).
     @MainActor
     private func choose(_ option: String, in picker: XCUIElement, _ what: String) {
-        XCTAssertTrue(picker.waitForExistence(timeout: 5), "\(what) should be on screen")
+        XCTAssertTrue(picker.waitToExist(timeout: 5), "\(what) should be on screen")
         guard !spokenText(of: picker).contains(option) else { return }
 
-        picker.click()
-
-        var item: XCUIElement?
-        _ = UITestApp.waitUntil(timeout: 5) {
-            item = self.openMenuItem(titled: option, in: picker)
-            return item != nil
-        }
-        if let item {
-            item.click()
-        } else {
-            app.typeText(typeSelectPrefix(of: option))
-            app.typeKey(XCUIKeyboardKey.return, modifierFlags: [])
-        }
-
         XCTAssertTrue(
-            waitForSpokenText(of: picker, toContain: option, timeout: 5),
+            UITestApp.chooseMenuOption(option, in: picker, of: app) {
+                self.spokenText(of: picker).contains(option)
+            },
             "\(what) should offer \"\(option)\" and be set to it — the picker reads "
-                + "\"\(spokenText(of: picker))\", and \(openMenuDescription())"
+                + "\"\(spokenText(of: picker))\", and \(UITestApp.describeOpenMenus(in: app))"
         )
     }
 
@@ -635,7 +568,7 @@ final class JourneyEditorUITests: MimicUITestCase {
     private func dismissMenu(waitingFor title: String) {
         app.typeKey(XCUIKeyboardKey.escape, modifierFlags: [])
         XCTAssertTrue(
-            app.menuItems[title].firstMatch.waitForNonExistence(timeout: 5),
+            app.menuItems[title].firstMatch.waitToDisappear(timeout: 5),
             "The context menu should close on Escape"
         )
     }
@@ -648,7 +581,7 @@ final class JourneyEditorUITests: MimicUITestCase {
     @MainActor
     private func waitForClosedMenu(itemTitled title: String) {
         XCTAssertTrue(
-            app.menuItems[title].firstMatch.waitForNonExistence(timeout: 5),
+            app.menuItems[title].firstMatch.waitToDisappear(timeout: 5),
             "The previous context menu should have closed before the next one opens"
         )
     }
@@ -676,7 +609,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         addTemplate("retry-after-failure", activate: false)
 
         XCTAssertTrue(
-            journeys.editorName.waitForExistence(timeout: 10),
+            journeys.editorName.waitToExist(timeout: 10),
             "The template journey should be open"
         )
         assertSpeaks(
@@ -704,7 +637,7 @@ final class JourneyEditorUITests: MimicUITestCase {
 
         // JRNEDIT-08 — the checkbox, in the inspector while no step is selected.
         XCTAssertTrue(
-            journeys.autoAdvanceToggle.waitForExistence(timeout: 5),
+            journeys.autoAdvanceToggle.waitToExist(timeout: 5),
             "Auto-advance should be offered in the journey's inspector"
         )
         // On by default — `Journey.init` declares `autoAdvance: Bool = true`, so a new journey walks
@@ -720,12 +653,12 @@ final class JourneyEditorUITests: MimicUITestCase {
 
         // Away…
         let scratchRow = journeys.row(named: "Scratch flow")
-        XCTAssertTrue(scratchRow.waitForExistence(timeout: 5), "Both journeys should be listed")
+        XCTAssertTrue(scratchRow.waitToExist(timeout: 5), "Both journeys should be listed")
         scratchRow.click()
 
         // JRNEDIT-09 — a journey with no steps explains itself instead of showing an empty list.
         XCTAssertTrue(
-            journeys.stepsEmptyState.waitForExistence(timeout: 10),
+            journeys.stepsEmptyState.waitToExist(timeout: 10),
             "A journey with no steps should show the steps empty state"
         )
         XCTAssertTrue(
@@ -735,7 +668,7 @@ final class JourneyEditorUITests: MimicUITestCase {
 
         // …and back.
         let templateRow = journeys.row(named: "Retry after failure")
-        XCTAssertTrue(templateRow.waitForExistence(timeout: 5), "The template journey should still be listed")
+        XCTAssertTrue(templateRow.waitToExist(timeout: 5), "The template journey should still be listed")
         templateRow.click()
         assertSpeaks(
             journeys.editorName,
@@ -789,7 +722,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         hideRequestLogDrawer()
 
         XCTAssertTrue(
-            journeys.stepsEmptyState.waitForExistence(timeout: 10),
+            journeys.stepsEmptyState.waitToExist(timeout: 10),
             "A new journey should explain that it has no steps yet"
         )
         XCTAssertTrue(
@@ -801,7 +734,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         )
 
         // JRNRUN-02 — a journey with nothing to serve cannot be activated.
-        XCTAssertTrue(journeys.activateButton.waitForExistence(timeout: 5), "Activate should be present")
+        XCTAssertTrue(journeys.activateButton.waitToExist(timeout: 5), "Activate should be present")
         XCTAssertFalse(
             journeys.activateButton.isEnabled,
             "Activating a journey with no steps would serve nothing, so it should be refused"
@@ -809,13 +742,14 @@ final class JourneyEditorUITests: MimicUITestCase {
 
         // JRNEDIT-10 — the Steps header carries the one creation action even when empty.
         XCTAssertTrue(
-            journeys.addStepButton.waitForExistence(timeout: 5),
+            journeys.addStepButton.waitToExist(timeout: 5),
             "The Steps header should offer to add the first step"
         )
-        journeys.addStepButton.click()
 
         // The assertion is that clicking it opens the sheet, and the geometry rides along in the
-        // message rather than in an assertion of its own.
+        // message rather than in an assertion of its own. `UITestApp.click(_:expecting:)` waits for
+        // the button to be hittable without requiring it, for the reason below, and records in the
+        // result bundle when it never was.
         //
         // `isHittable` was that assertion last round and it is not a property this window's controls
         // dependably carry: `WorkspaceShellUITests.testGroupCrumbJumpsToAnotherGroup` clicks the
@@ -826,7 +760,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         // sheet that does not open, with the frames printed beside it so the next reader can tell a
         // squeezed pane from a mis-targeted query.
         XCTAssertTrue(
-            stepSheet.pathField.waitForExistence(timeout: 5),
+            UITestApp.click(journeys.addStepButton, expecting: { self.stepSheet.pathField.exists }),
             "The step sheet should open when the Steps action is clicked — "
                 + "the call to action is \(describe(journeys.addStepButton)) "
                 + "inside \(describe(journeys.stepsEmptyState))"
@@ -837,7 +771,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         stepSheet.pathField.typeText("/orders")
         stepSheet.saveButton.click()
 
-        XCTAssertTrue(journeys.step(at: 0).waitForExistence(timeout: 5), "The step should join the sequence")
+        XCTAssertTrue(journeys.step(at: 0).waitToExist(timeout: 5), "The step should join the sequence")
         assertSpeaks(
             journeys.step(at: 0),
             contains: "/orders",
@@ -849,7 +783,7 @@ final class JourneyEditorUITests: MimicUITestCase {
             "A step saved with the default status should respond with it"
         )
         XCTAssertTrue(
-            journeys.stepsEmptyState.waitForNonExistence(timeout: 5),
+            journeys.stepsEmptyState.waitToDisappear(timeout: 5),
             "The empty state should give way to the step list"
         )
         XCTAssertTrue(
@@ -890,9 +824,9 @@ final class JourneyEditorUITests: MimicUITestCase {
 
         // JRNSTEP-20 — cancelling leaves the journey as it was.
         stepSheet.cancelButton.click()
-        XCTAssertTrue(stepSheet.pathField.waitForNonExistence(timeout: 5), "Cancel should dismiss the sheet")
+        XCTAssertTrue(stepSheet.pathField.waitToDisappear(timeout: 5), "Cancel should dismiss the sheet")
         XCTAssertTrue(
-            journeys.stepsEmptyState.waitForExistence(timeout: 5),
+            journeys.stepsEmptyState.waitToExist(timeout: 5),
             "Cancelling should add nothing, so the journey should still have no steps"
         )
         XCTAssertFalse(journeys.step(at: 0).exists, "No step should have been created")
@@ -927,7 +861,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         // JRNSTEP-06 — editing the offending field clears its complaint.
         replaceText(in: stepSheet.pathField, with: "/orders")
         XCTAssertTrue(
-            stepSheet.validationMessage.waitForNonExistence(timeout: 5),
+            stepSheet.validationMessage.waitToDisappear(timeout: 5),
             "Fixing the path should retract the complaint about it"
         )
 
@@ -968,11 +902,11 @@ final class JourneyEditorUITests: MimicUITestCase {
         replaceText(in: stepSheet.repeatField, with: "1")
         selectOutcome("Time out")
         XCTAssertTrue(
-            stepSheet.holdField.waitForExistence(timeout: 5),
+            stepSheet.holdField.waitToExist(timeout: 5),
             "Timing out should ask how long to hold"
         )
         XCTAssertTrue(
-            stepSheet.timeoutHint.waitForExistence(timeout: 5),
+            stepSheet.timeoutHint.waitToExist(timeout: 5),
             "The hold should be explained beside the field"
         )
         replaceText(in: stepSheet.holdField, with: "abc")
@@ -987,10 +921,10 @@ final class JourneyEditorUITests: MimicUITestCase {
         replaceText(in: stepSheet.holdField, with: "750")
         stepSheet.saveButton.click()
         XCTAssertTrue(
-            stepSheet.pathField.waitForNonExistence(timeout: 5),
+            stepSheet.pathField.waitToDisappear(timeout: 5),
             "The sheet should close on a good save"
         )
-        XCTAssertTrue(journeys.step(at: 0).waitForExistence(timeout: 5), "The step should join the sequence")
+        XCTAssertTrue(journeys.step(at: 0).waitToExist(timeout: 5), "The step should join the sequence")
         assertSpeaks(
             journeys.step(at: 0),
             contains: "fails with timeout 750ms",
@@ -1013,7 +947,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         XCTAssertFalse(stepSheet.headersField.exists, "A new step should open on its body, not its headers")
         // Timing is no longer behind a disclosure: a respond step shows its delay and serve count
         // inline beside the status, with their defaults.
-        XCTAssertTrue(stepSheet.delayField.waitForExistence(timeout: 5),
+        XCTAssertTrue(stepSheet.delayField.waitToExist(timeout: 5),
                       "A respond step should show its delay without a disclosure")
         XCTAssertTrue(stepSheet.repeatField.exists, "…and its serve count beside it")
         let defaultScreenshot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
@@ -1036,7 +970,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         stepSheet.headersTab.click()
         stepSheet.reveal(stepSheet.headersHint, byScrollingUp: true)
         XCTAssertTrue(
-            stepSheet.headersHint.waitForExistence(timeout: 5),
+            stepSheet.headersHint.waitToExist(timeout: 5),
             "The headers field should explain how to add another line"
         )
         assertSpeaks(
@@ -1073,7 +1007,7 @@ final class JourneyEditorUITests: MimicUITestCase {
                      "The corrected header must contain a colon before saving")
         stepSheet.reveal(stepSheet.bodyTab, byScrollingUp: true)
         stepSheet.bodyTab.click()
-        XCTAssertTrue(stepSheet.bodyField.waitForExistence(timeout: 5), "Body should swap the headers out")
+        XCTAssertTrue(stepSheet.bodyField.waitToExist(timeout: 5), "Body should swap the headers out")
         stepSheet.reveal(stepSheet.bodyField, byScrollingUp: true)
         XCTAssertTrue(stepSheet.bodyField.isHittable, "The response body should scroll into view")
         stepSheet.bodyField.click()
@@ -1126,9 +1060,9 @@ final class JourneyEditorUITests: MimicUITestCase {
         add(screenshot)
 
         stepSheet.saveButton.click()
-        XCTAssertTrue(stepSheet.pathField.waitForNonExistence(timeout: 5), "The sheet should close on save")
+        XCTAssertTrue(stepSheet.pathField.waitToDisappear(timeout: 5), "The sheet should close on save")
 
-        XCTAssertTrue(journeys.step(at: 0).waitForExistence(timeout: 5), "The step should join the sequence")
+        XCTAssertTrue(journeys.step(at: 0).waitToExist(timeout: 5), "The step should join the sequence")
         assertSpeaks(
             journeys.step(at: 0),
             contains: "POST",
@@ -1138,7 +1072,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         assertSpeaks(journeys.step(at: 0), contains: "responds 402", "The step should keep its status code")
 
         journeys.step(at: 0).doubleClick()
-        XCTAssertTrue(stepSheet.bodyField.waitForExistence(timeout: 5), "The saved step should reopen")
+        XCTAssertTrue(stepSheet.bodyField.waitToExist(timeout: 5), "The saved step should reopen")
         XCTAssertEqual(stepSheet.bodyField.value as? String, formattedBody,
                        "The formatted body should survive saving and reopening exactly")
         // A reopened sheet starts at the top, so on a short screen the body sits below the viewport.
@@ -1149,9 +1083,9 @@ final class JourneyEditorUITests: MimicUITestCase {
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.stepSheet.bodyField.value as? String == "" },
                       "Clearing must empty the editor before saving")
         stepSheet.saveButton.click()
-        XCTAssertTrue(stepSheet.pathField.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(stepSheet.pathField.waitToDisappear(timeout: 5))
         journeys.step(at: 0).doubleClick()
-        XCTAssertTrue(stepSheet.bodyField.waitForExistence(timeout: 5))
+        XCTAssertTrue(stepSheet.bodyField.waitToExist(timeout: 5))
         XCTAssertEqual(stepSheet.bodyField.value as? String, "",
                        "An explicitly cleared body must stay empty when the saved step reopens")
         stepSheet.cancelButton.click()
@@ -1168,12 +1102,12 @@ final class JourneyEditorUITests: MimicUITestCase {
         createEmptyJourney(named: "Transport failures")
         openStepSheet()
 
-        XCTAssertTrue(stepSheet.statusField.waitForExistence(timeout: 5), "Respond is the default outcome")
+        XCTAssertTrue(stepSheet.statusField.waitToExist(timeout: 5), "Respond is the default outcome")
 
         // JRNSTEP-12.
         selectOutcome("Drop connection")
         XCTAssertTrue(
-            stepSheet.dropHint.waitForExistence(timeout: 5),
+            stepSheet.dropHint.waitToExist(timeout: 5),
             "Dropping the connection should explain what the client sees"
         )
         assertSpeaks(
@@ -1182,18 +1116,18 @@ final class JourneyEditorUITests: MimicUITestCase {
             "The explanation should say the client sees a network failure, not a status code"
         )
         XCTAssertTrue(
-            stepSheet.statusField.waitForNonExistence(timeout: 5),
+            stepSheet.statusField.waitToDisappear(timeout: 5),
             "A dropped connection has no status code to set"
         )
 
         // JRNSTEP-13 — and the third outcome brings its own field.
         selectOutcome("Time out")
-        XCTAssertTrue(stepSheet.holdField.waitForExistence(timeout: 5), "Timing out should ask for a hold")
+        XCTAssertTrue(stepSheet.holdField.waitToExist(timeout: 5), "Timing out should ask for a hold")
         XCTAssertFalse(stepSheet.statusField.exists, "A timeout has no status code either")
 
         selectOutcome("Respond")
         XCTAssertTrue(
-            stepSheet.statusField.waitForExistence(timeout: 5),
+            stepSheet.statusField.waitToExist(timeout: 5),
             "Coming back to Respond should bring the status code back"
         )
 
@@ -1202,7 +1136,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         stepSheet.pathField.typeText("/stream")
         stepSheet.saveButton.click()
 
-        XCTAssertTrue(journeys.step(at: 0).waitForExistence(timeout: 5), "The step should join the sequence")
+        XCTAssertTrue(journeys.step(at: 0).waitToExist(timeout: 5), "The step should join the sequence")
         assertSpeaks(
             journeys.step(at: 0),
             contains: "fails with drop",
@@ -1228,11 +1162,11 @@ final class JourneyEditorUITests: MimicUITestCase {
         stepSheet.pathField.typeText("/payments")
         replaceText(in: stepSheet.statusField, with: "402")
         stepSheet.saveButton.click()
-        XCTAssertTrue(journeys.step(at: 0).waitForExistence(timeout: 5), "The step should join the sequence")
+        XCTAssertTrue(journeys.step(at: 0).waitToExist(timeout: 5), "The step should join the sequence")
 
         // JRNORD-01 — the row is the way back into the sheet: one click selects, two open it.
         journeys.step(at: 0).doubleClick()
-        XCTAssertTrue(stepSheet.pathField.waitForExistence(timeout: 5), "Double-clicking a step should reopen it")
+        XCTAssertTrue(stepSheet.pathField.waitToExist(timeout: 5), "Double-clicking a step should reopen it")
 
         // JRNSTEP-21 — the sheet is headed differently and arrives populated.
         assertSpeaks(
@@ -1253,7 +1187,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         // JRNSTEP-22 — the edit replaces the step rather than appending a second one.
         replaceText(in: stepSheet.pathField, with: "/payments/retry")
         stepSheet.saveButton.click()
-        XCTAssertTrue(stepSheet.pathField.waitForNonExistence(timeout: 5), "The sheet should close on save")
+        XCTAssertTrue(stepSheet.pathField.waitToDisappear(timeout: 5), "The sheet should close on save")
 
         assertSpeaks(
             journeys.step(at: 0),
@@ -1266,7 +1200,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         // step the menu was opened on rather than a fresh one.
         journeys.step(at: 0).rightClick()
         menuItem("journeyEditor.step.contextMenu.edit", title: "Edit step\u{2026}").click()
-        XCTAssertTrue(stepSheet.pathField.waitForExistence(timeout: 5), "Edit step… should open the sheet")
+        XCTAssertTrue(stepSheet.pathField.waitToExist(timeout: 5), "Edit step… should open the sheet")
         assertSpeaks(stepSheet.title, contains: "Edit step", "The menu should open the sheet for editing")
         assertSpeaks(
             stepSheet.pathField,
@@ -1274,7 +1208,7 @@ final class JourneyEditorUITests: MimicUITestCase {
             "The sheet should load the step the menu was opened on, with the edit already in it"
         )
         stepSheet.cancelButton.click()
-        XCTAssertTrue(stepSheet.pathField.waitForNonExistence(timeout: 5), "Cancel should dismiss the sheet")
+        XCTAssertTrue(stepSheet.pathField.waitToDisappear(timeout: 5), "Cancel should dismiss the sheet")
     }
 
     // MARK: - 8. The step context menu  (JRNORD-02/04/05/06)
@@ -1291,7 +1225,7 @@ final class JourneyEditorUITests: MimicUITestCase {
 
         for index in 0..<4 {
             XCTAssertTrue(
-                journeys.step(at: index).waitForExistence(timeout: 10),
+                journeys.step(at: index).waitToExist(timeout: 10),
                 "Step \(index) should be listed"
             )
         }
@@ -1344,7 +1278,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         menuItem("journeyEditor.step.contextMenu.remove", title: "Remove step").click()
 
         XCTAssertTrue(
-            journeys.step(at: 3).waitForNonExistence(timeout: 5),
+            journeys.step(at: 3).waitToDisappear(timeout: 5),
             "Removing a step should leave the journey one shorter"
         )
         for index in 0..<3 {
@@ -1368,7 +1302,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         showJourneysNavigator()
         addTemplate("payment-retry", activate: false)
 
-        XCTAssertTrue(journeys.editorName.waitForExistence(timeout: 10), "The journey should be open")
+        XCTAssertTrue(journeys.editorName.waitToExist(timeout: 10), "The journey should be open")
 
         // JRNRUN-01 — the readout answers "is something overriding my endpoints right now".
         assertSpeaks(
@@ -1380,7 +1314,7 @@ final class JourneyEditorUITests: MimicUITestCase {
 
         journeys.activateButton.click()
         XCTAssertTrue(
-            journeys.deactivateButton.waitForExistence(timeout: 10),
+            journeys.deactivateButton.waitToExist(timeout: 10),
             "Activating should offer to stop"
         )
 
@@ -1454,31 +1388,31 @@ final class JourneyEditorUITests: MimicUITestCase {
         addTemplate("session-expiry", activate: false)
         let name = "Session expires mid-flow"
         let row = journeys.row(named: name)
-        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertTrue(row.waitToExist(timeout: 10))
         let initialFrame = row.frame
         row.click()
-        XCTAssertTrue(journeys.activateButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(journeys.activateButton.waitToExist(timeout: 5))
         XCTAssertFalse(journeys.activeJourneyIndicator.exists, "Selecting must not activate")
         journeys.activateButton.click()
-        XCTAssertTrue(journeys.activeJourneyIndicator.waitForExistence(timeout: 10))
+        XCTAssertTrue(journeys.activeJourneyIndicator.waitToExist(timeout: 10))
         XCTAssertEqual(row.frame.minY, initialFrame.minY, accuracy: 1, "Activation must not move the list")
         XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { self.sidebarRunText().contains("step 1 of 5") })
         journeys.advanceButton.click()
         XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { self.sidebarRunText().contains("step 2 of 5") })
         let shell = WorkspaceShellPage(app: app)
         shell.endpointsTab.click()
-        XCTAssertTrue(journeys.activeJourneyIndicator.waitForNonExistence(timeout: 5),
+        XCTAssertTrue(journeys.activeJourneyIndicator.waitToDisappear(timeout: 5),
                       "The endpoints navigator lists endpoints, not the journey")
         journeys.showActiveJourneyFromMenu()
-        XCTAssertTrue(journeys.editorName.waitForExistence(timeout: 5))
-        XCTAssertTrue(journeys.activeJourneyIndicator.waitForExistence(timeout: 5),
+        XCTAssertTrue(journeys.editorName.waitToExist(timeout: 5))
+        XCTAssertTrue(journeys.activeJourneyIndicator.waitToExist(timeout: 5),
                       "Show Active Journey should bring the navigator back to the running journey")
         XCTAssertTrue(sidebarRunText().contains("step 2 of 5"), "Revealing the journey must not restart it")
         journeys.restartButton.click()
         XCTAssertTrue(UITestApp.waitUntil(timeout: 10) { self.sidebarRunText().contains("step 1 of 5") })
         journeys.deactivateButton.click()
-        XCTAssertTrue(journeys.activeJourneyIndicator.waitForNonExistence(timeout: 10))
-        XCTAssertTrue(journeys.activateButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(journeys.activeJourneyIndicator.waitToDisappear(timeout: 10))
+        XCTAssertTrue(journeys.activateButton.waitToExist(timeout: 5))
     }
 
     // MARK: - 11. Duplicating a journey  (JRN-09, JRNDUP)
@@ -1491,7 +1425,7 @@ final class JourneyEditorUITests: MimicUITestCase {
 
         let name = "Payment succeeds on retry"
         let row = journeys.row(named: name)
-        XCTAssertTrue(row.waitForExistence(timeout: 10), "The journey should be listed")
+        XCTAssertTrue(row.waitToExist(timeout: 10), "The journey should be listed")
         assertSpeaks(row, contains: "2 steps", "The row should say how much journey it is")
         assertSpeaks(row, contains: "not active", "Selecting a journey is not activating it")
 
@@ -1504,7 +1438,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         // JRNDUP-01/02.
         duplicate.click()
         let copy = journeys.row(named: "\(name) (Copy)")
-        XCTAssertTrue(copy.waitForExistence(timeout: 10), "The copy should be listed beside the original")
+        XCTAssertTrue(copy.waitToExist(timeout: 10), "The copy should be listed beside the original")
         assertSpeaks(copy, contains: "2 steps", "The copy should carry the same steps as the original")
         XCTAssertTrue(journeys.row(named: name).exists, "The original should still be there")
     }
@@ -1524,7 +1458,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         addTemplate("payment-retry", activate: false)
 
         let name = "Payment succeeds on retry"
-        XCTAssertTrue(journeys.row(named: name).waitForExistence(timeout: 10), "The journey should be listed")
+        XCTAssertTrue(journeys.row(named: name).waitToExist(timeout: 10), "The journey should be listed")
 
         // JRNDEL-01/02.
         journeys.row(named: name).rightClick()
@@ -1572,7 +1506,7 @@ final class JourneyEditorUITests: MimicUITestCase {
 
         // JRNDEL-03.
         confirmation.buttons["Cancel"].click()
-        XCTAssertTrue(confirmation.waitForNonExistence(timeout: 5), "Cancelling should dismiss the alert")
+        XCTAssertTrue(confirmation.waitToDisappear(timeout: 5), "Cancelling should dismiss the alert")
         XCTAssertTrue(journeys.row(named: name).exists, "Cancelling should leave the journey where it was")
 
         // JRNDEL-04.
@@ -1587,18 +1521,18 @@ final class JourneyEditorUITests: MimicUITestCase {
         (second.exists ? second : secondDialog).buttons["Delete"].click()
 
         XCTAssertTrue(
-            journeys.row(named: name).waitForNonExistence(timeout: 10),
+            journeys.row(named: name).waitToDisappear(timeout: 10),
             "Confirming should remove the journey"
         )
 
         // JRNDEL-05 — and with the last journey gone, the navigator explains itself again.
         XCTAssertTrue(
-            journeys.emptyStateHeading.waitForExistence(timeout: 10),
+            journeys.emptyStateHeading.waitToExist(timeout: 10),
             "Deleting the last journey should bring the empty state back"
         )
         // JRNEDIT-04 — the centre pane has nothing left to edit and says so.
         XCTAssertTrue(
-            journeys.noJourneySelectionEmptyState.waitForExistence(timeout: 10),
+            journeys.noJourneySelectionEmptyState.waitToExist(timeout: 10),
             "With no journey selected the centre pane should explain why it is empty"
         )
     }
@@ -1643,7 +1577,7 @@ final class JourneyEditorUITests: MimicUITestCase {
         ]
 
         let first = templatePicker.template(shelf[0].id)
-        XCTAssertTrue(first.waitForExistence(timeout: 5), "The shelf should open on its first template")
+        XCTAssertTrue(first.waitToExist(timeout: 5), "The shelf should open on its first template")
         first.click()
 
         for (index, template) in shelf.enumerated() {
@@ -1652,7 +1586,7 @@ final class JourneyEditorUITests: MimicUITestCase {
             }
             let row = templatePicker.template(template.id)
             XCTAssertTrue(
-                row.waitForExistence(timeout: 5),
+                row.waitToExist(timeout: 5),
                 "Template \(template.id) should be reachable on the shelf"
             )
             assertSpeaks(row, contains: template.title, "The \(template.id) row should carry its title")
@@ -1666,11 +1600,11 @@ final class JourneyEditorUITests: MimicUITestCase {
         // JRNTMPL-08.
         templatePicker.cancelButton.click()
         XCTAssertTrue(
-            templatePicker.addButton.waitForNonExistence(timeout: 5),
+            templatePicker.addButton.waitToDisappear(timeout: 5),
             "Cancel should dismiss the picker"
         )
         XCTAssertTrue(
-            journeys.emptyStateHeading.waitForExistence(timeout: 5),
+            journeys.emptyStateHeading.waitToExist(timeout: 5),
             "Cancelling should add nothing, so the project should still have no journeys"
         )
     }
@@ -1685,11 +1619,11 @@ final class JourneyEditorUITests: MimicUITestCase {
         // JRNTMPL-04 — added inert.
         addTemplate("mfa-challenge", activate: false)
         XCTAssertTrue(
-            journeys.editorName.waitForExistence(timeout: 10),
+            journeys.editorName.waitToExist(timeout: 10),
             "The journey should open in the editor"
         )
         XCTAssertTrue(
-            journeys.activateButton.waitForExistence(timeout: 5),
+            journeys.activateButton.waitToExist(timeout: 5),
             "An inert journey offers to be activated"
         )
         XCTAssertFalse(journeys.activeBadge.exists, "An inert journey should not read as active")
@@ -1703,15 +1637,15 @@ final class JourneyEditorUITests: MimicUITestCase {
         // JRNTMPL-05 — added answering.
         addTemplate("payment-retry", activate: true)
         XCTAssertTrue(
-            journeys.activeBadge.waitForExistence(timeout: 10),
+            journeys.activeBadge.waitToExist(timeout: 10),
             "A journey added with the toggle on should be answering immediately"
         )
         XCTAssertTrue(
-            journeys.deactivateButton.waitForExistence(timeout: 10),
+            journeys.deactivateButton.waitToExist(timeout: 10),
             "The editor should offer to stop it"
         )
         XCTAssertTrue(
-            journeys.activeJourneyIndicator.waitForExistence(timeout: 10),
+            journeys.activeJourneyIndicator.waitToExist(timeout: 10),
             "The navigator should show the active journey indicator"
         )
         assertSpeaks(
@@ -1735,11 +1669,11 @@ final class JourneyEditorUITests: MimicUITestCase {
 
         journeys.addButton.click()
         XCTAssertTrue(
-            journeys.newEmptyMenuItem.waitForExistence(timeout: 5),
+            journeys.newEmptyMenuItem.waitToExist(timeout: 5),
             "The add menu should offer an empty journey"
         )
         journeys.newEmptyMenuItem.click()
-        XCTAssertTrue(newJourneySheet.nameField.waitForExistence(timeout: 5), "The sheet should open")
+        XCTAssertTrue(newJourneySheet.nameField.waitToExist(timeout: 5), "The sheet should open")
 
         // JRNNEW-02.
         assertSpeaks(newJourneySheet.title, contains: "New journey", "The sheet should say what it is")
@@ -1755,19 +1689,19 @@ final class JourneyEditorUITests: MimicUITestCase {
         // JRNNEW-07 — and the sheet can be walked away from.
         newJourneySheet.cancelButton.click()
         XCTAssertTrue(
-            newJourneySheet.nameField.waitForNonExistence(timeout: 5),
+            newJourneySheet.nameField.waitToDisappear(timeout: 5),
             "Cancel should dismiss the sheet"
         )
         XCTAssertTrue(
-            journeys.emptyStateHeading.waitForExistence(timeout: 5),
+            journeys.emptyStateHeading.waitToExist(timeout: 5),
             "Cancelling should create nothing"
         )
 
         // JRNNEW-06 — Return in the name field is the keyboard path to the same result.
         journeys.addButton.click()
-        XCTAssertTrue(journeys.newEmptyMenuItem.waitForExistence(timeout: 5), "The add menu should reopen")
+        XCTAssertTrue(journeys.newEmptyMenuItem.waitToExist(timeout: 5), "The add menu should reopen")
         journeys.newEmptyMenuItem.click()
-        XCTAssertTrue(newJourneySheet.nameField.waitForExistence(timeout: 5), "The sheet should reopen")
+        XCTAssertTrue(newJourneySheet.nameField.waitToExist(timeout: 5), "The sheet should reopen")
         newJourneySheet.nameField.click()
         newJourneySheet.nameField.typeText("Typed and returned")
         XCTAssertTrue(
@@ -1777,11 +1711,11 @@ final class JourneyEditorUITests: MimicUITestCase {
         app.typeKey(XCUIKeyboardKey.return, modifierFlags: [])
 
         XCTAssertTrue(
-            newJourneySheet.nameField.waitForNonExistence(timeout: 5),
+            newJourneySheet.nameField.waitToDisappear(timeout: 5),
             "Return should commit the sheet"
         )
         XCTAssertTrue(
-            journeys.row(named: "Typed and returned").waitForExistence(timeout: 10),
+            journeys.row(named: "Typed and returned").waitToExist(timeout: 10),
             "The journey should be listed under the name that was typed"
         )
         assertSpeaks(

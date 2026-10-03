@@ -48,9 +48,16 @@ struct WindowRoleFrame: NSViewRepresentable {
         private var pendingRole: Role?
         /// The workspace's frame from this session, for when no store has one yet.
         private var workspaceFrame: CGRect?
+        #if DEBUG
+        /// Whether a UI test launch has put this window at its starting frame yet.
+        private var hasPreparedWindowForTesting = false
+        #endif
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            #if DEBUG
+            if let window { UITestSupport.stopFrameAutosave(window) }
+            #endif
             if let pendingRole { apply(pendingRole) }
         }
 
@@ -66,6 +73,15 @@ struct WindowRoleFrame: NSViewRepresentable {
             // Applied after SwiftUI has swapped the content, so its new minimum size is in place.
             DispatchQueue.main.async { [weak self, weak window] in
                 guard let self, let window else { return }
+                #if DEBUG
+                // Before the first role reads the frame, so a UI test starts where a clean CI runner
+                // does rather than where the previous test left the window. Once: a later role
+                // change keeps whatever frame the test has given the window since.
+                if !self.hasPreparedWindowForTesting {
+                    self.hasPreparedWindowForTesting = true
+                    UITestSupport.prepareWindowForTesting(window)
+                }
+                #endif
                 switch role {
                 case .welcome:
                     self.showWelcome(in: window, leavingWorkspace: previous == .workspace || previous == nil)
@@ -84,7 +100,7 @@ struct WindowRoleFrame: NSViewRepresentable {
                 workspaceFrame = frame
                 store?.saveWorkspaceFrame(frame)
             }
-            guard let visible = window.screen?.visibleFrame else { return }
+            guard let visible = ScreenGeometry.visibleFrame(of: window.screen) else { return }
             let target = WindowRoleFrame.centredFrame(around: frame, size: welcomeSize, visible: visible)
             guard target != frame else { return }
             window.setFrame(target, display: true, animate: false)
@@ -94,7 +110,7 @@ struct WindowRoleFrame: NSViewRepresentable {
             // With no frame of its own yet, the workspace opens at the size the window first had
             // before the welcome screen took its own: kept at the welcome screen's size, a first
             // project opened too narrow for the inspector, which then hid itself.
-            guard let visible = window.screen?.visibleFrame else { return }
+            guard let visible = ScreenGeometry.visibleFrame(of: window.screen) else { return }
             var target = store?.loadWorkspaceFrame() ?? workspaceFrame
                 ?? WindowRoleFrame.centredFrame(
                     around: window.frame, size: WindowRoleFrame.defaultWorkspaceSize, visible: visible

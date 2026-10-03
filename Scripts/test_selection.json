@@ -1,13 +1,19 @@
 {
   "_comment": [
     "Which tests a change runs. Read by Scripts/select_tests.py (CI's plan job) and Scripts/check_ui_shards.py.",
-    "ui_shards: the XCUITest split. Every UI test method must be selected by exactly one shard.",
+    "ui_shards: the XCUITest split. Every UI test method must be selected by exactly one shard. minutes is the shard's measured CI job time (median, setup included); the plan queues the longest first, so refresh it when a shard's contents change. allowance is how many seconds one test may run before XCTest fails it (default 300). retry false runs a failing test once instead of twice (default true; the nightly never retries).",
     "smoke_shard: added to every run that selects any UI shard.",
-    "ui_classes_by_target: for each module the app links, the UI test classes its changes run; \"all\" runs every shard.",
-    "full_paths: a change here runs everything (unit suites, every UI shard, the Release build).",
+    "ui_classes_by_target: for each module the app links, the UI test classes its changes run; \"all\" runs every shard. select_tests.py --check fails when a UI class spells out an accessibility identifier a module defines and the module's list does not name it.",
+    "ui_shared_support: UI test files every UI test launches through; a change to one runs every shard. Any other UI test file runs its own classes and every class whose file uses a type it declares.",
+    "full_paths: a change here runs every unit suite and every UI shard.",
+    "release_paths: a change here also runs the Release build, which otherwise runs only nightly and on a manual full run.",
+    "gallery_paths: debug-only gallery code no UI test reaches; a change here runs gallery_unit_targets and no UI shard.",
+    "path_owners: source a target compiles from outside its buildable folder, with that target.",
+    "snapshot_paths: when a pull request push changes only these, and the previous head passed the UI suite, that verdict stands and no UI shard runs again.",
     "linux_only_paths: a change here needs no macOS job; the Linux job always runs.",
     "cli_paths: a change here runs the macOS build and CLI end-to-end checks without unit or UI tests.",
-    "Any path matched by none of these and owned by no Tuist target runs everything."
+    "This file: a change confined to ui_shards runs the shards it adds or changes; a change to anything else runs everything.",
+    "Any path matched by none of these and owned by no Tuist target runs everything, the Release build included."
   ],
   "smoke_shard": 1,
   "ui_classes_by_target": {
@@ -20,25 +26,36 @@
       "WorkspaceShellUITests",
       "NavigatorUITests",
       "MimicUITests",
-      "LayoutAuditUITests"
+      "LayoutAuditUITests",
+      "BackendSettingsUITests",
+      "RequestLogUITests"
     ],
     "EndpointsFeature": [
       "EndpointEditorUITests",
       "NavigatorUITests",
-      "LayoutAuditUITests"
+      "LayoutAuditUITests",
+      "ErrorAlertUITests"
     ],
     "JourneysFeature": [
       "JourneyEditorUITests",
       "JourneyUITests",
-      "LayoutAuditUITests"
+      "LayoutAuditUITests",
+      "MimicUITests",
+      "NavigatorUITests",
+      "RequestLogUITests",
+      "WorkspaceShellUITests"
     ],
     "RequestLogFeature": [
       "RequestLogUITests",
-      "LayoutAuditUITests"
+      "LayoutAuditUITests",
+      "WorkspaceShellUITests",
+      "ErrorAlertUITests"
     ],
     "ServerFeature": [
       "BackendSettingsUITests",
-      "LayoutAuditUITests"
+      "LayoutAuditUITests",
+      "WorkspaceShellUITests",
+      "ErrorAlertUITests"
     ],
     "ImportFeature": [
       "SpecImportUITests"
@@ -60,23 +77,60 @@
     "MockServerEngine": [
       "RequestLogUITests",
       "JourneyUITests",
-      "BackendSettingsUITests"
+      "BackendSettingsUITests",
+      "EndpointEditorUITests",
+      "ErrorAlertUITests",
+      "MimicUITests",
+      "NavigatorUITests",
+      "WorkspaceShellUITests",
+      "LayoutAuditUITests"
     ],
     "Persistence": [
       "MimicUITests",
       "WelcomeProjectUITests",
-      "ErrorAlertUITests"
+      "ErrorAlertUITests",
+      "EndpointEditorUITests",
+      "JourneyEditorUITests",
+      "JourneyUITests",
+      "WorkspaceShellUITests"
     ]
   },
+  "ui_shared_support": [
+    "MimicUITests/MimicUITestCase.swift",
+    "MimicUITests/AppLaunchSupport.swift",
+    "MimicUITests/MimicUITestPages.swift",
+    "MimicUITests/UITestEnvironment.swift"
+  ],
   "full_paths": [
     "Project.swift",
     "Tuist/**",
     "mise.toml",
     "Configs/**",
+    "Vendor/*/Package.swift",
     ".github/workflows/ci.yml",
     ".github/actions/**",
-    "Scripts/select_tests.py",
-    "Scripts/test_selection.json"
+    "Scripts/select_tests.py"
+  ],
+  "release_paths": [
+    "Project.swift",
+    "Tuist/**",
+    "mise.toml",
+    "Configs/**",
+    "Vendor/*/Package.swift"
+  ],
+  "gallery_paths": [
+    "Sources/DesignSystem/Catalog/**",
+    "Tools/MimicGallery/**"
+  ],
+  "gallery_unit_targets": [
+    "DesignFidelityTests",
+    "DesignSystemTests"
+  ],
+  "path_owners": {
+    "Vendor/CodeEditorView/Sources/**": "DesignSystem"
+  },
+  "snapshot_paths": [
+    "Tests/DesignFidelityTests/Snapshots/*.png"
   ],
   "linux_only_paths": [
     "**/*.md",
@@ -100,6 +154,7 @@
     {
       "id": 1,
       "name": "core window A",
+      "minutes": 8.2,
       "tests": [
         "MimicUITests/testArrowKeysMoveThroughTheRequestLog",
         "MimicUITests/testAutosaveIndicatorAppearsAfterEdit",
@@ -123,6 +178,7 @@
     {
       "id": 2,
       "name": "core window B",
+      "minutes": 8.3,
       "tests": [
         "MimicUITests/testCancelButtonDismissesNewProjectSheet",
         "MimicUITests/testCaptureEvidenceScreenshots",
@@ -146,6 +202,7 @@
     {
       "id": 3,
       "name": "journeys and spec import",
+      "minutes": 10.0,
       "tests": [
         "JourneyUITests",
         "SpecImportUITests"
@@ -154,6 +211,7 @@
     {
       "id": 4,
       "name": "updates and backend settings",
+      "minutes": 7.6,
       "tests": [
         "UpdateUITests",
         "ControlPlaneIsolationTests",
@@ -163,6 +221,7 @@
     {
       "id": 5,
       "name": "workspace shell A",
+      "minutes": 11.4,
       "tests": [
         "WorkspaceShellUITests/testClickingALoggedRequestTakesOverTheCentreColumn",
         "WorkspaceShellUITests/testInspectorOverviewAnswersForTheProject",
@@ -186,6 +245,7 @@
     {
       "id": 6,
       "name": "workspace shell B",
+      "minutes": 10.3,
       "tests": [
         "WorkspaceShellUITests/testAutosaveIndicatorClearsOnceTheSaveSettles",
         "WorkspaceShellUITests/testAutosaveReportsAStoreThatRefusesTheWrite",
@@ -202,12 +262,14 @@
         "WorkspaceShellUITests/testServerMenuStartsStopsAndFlipsItsTitle",
         "WorkspaceShellUITests/testServerWellReportsItsStateAndCopiesTheAddress",
         "WorkspaceShellUITests/testUnmatchedBadgeOpensTheLogFilteredToUnmatched",
-        "WorkspaceShellUITests/testViewMenuAndShortcutSwitchNavigators"
+        "WorkspaceShellUITests/testViewMenuAndShortcutSwitchNavigators",
+        "WorkspaceShellUITests/testHidingTheInspectorRemeasuresTheToolbar"
       ]
     },
     {
       "id": 7,
       "name": "welcome projects A",
+      "minutes": 5.9,
       "tests": [
         "WelcomeProjectUITests/testArrowKeysMoveTheRecentsSelectionAndReturnOpensIt",
         "WelcomeProjectUITests/testWelcomeScreenAndWorkspaceKeepTheirOwnWindowSizes",
@@ -224,6 +286,7 @@
     {
       "id": 8,
       "name": "request log",
+      "minutes": 9.6,
       "tests": [
         "RequestLogUITests"
       ]
@@ -231,6 +294,7 @@
     {
       "id": 9,
       "name": "navigator",
+      "minutes": 8.8,
       "tests": [
         "NavigatorUITests"
       ]
@@ -238,6 +302,7 @@
     {
       "id": 10,
       "name": "endpoint editor A",
+      "minutes": 11.2,
       "tests": [
         "EndpointEditorUITests/testCompactEditorMoreMenuRespondsAtEdgeInDarkAppearance",
         "EndpointEditorUITests/testClearingTheBodyPersistsWithoutChangingAnotherScenario",
@@ -261,6 +326,7 @@
     {
       "id": 11,
       "name": "endpoint editor B",
+      "minutes": 10.7,
       "tests": [
         "EndpointEditorUITests/testAGroupSectionKeepsItsEndpointListedWhileASiblingIsEdited",
         "EndpointEditorUITests/testActivatingAScenarioMovesTheActiveMarkerOffThePreviousOne",
@@ -284,6 +350,7 @@
     {
       "id": 12,
       "name": "alerts",
+      "minutes": 8.2,
       "tests": [
         "ErrorAlertUITests"
       ]
@@ -291,6 +358,7 @@
     {
       "id": 13,
       "name": "journey editor A",
+      "minutes": 7.6,
       "tests": [
         "JourneyEditorUITests/testEditingAStepLoadsItsValuesAndSavesInPlace",
         "JourneyEditorUITests/testNewJourneySheetExplainsItselfAndCreatesOnReturn",
@@ -304,6 +372,7 @@
     {
       "id": 14,
       "name": "journey editor B",
+      "minutes": 7.9,
       "tests": [
         "JourneyEditorUITests/testBehaviourControlsChangeTheJourneyAndSurviveReselection",
         "JourneyEditorUITests/testDeleteJourneyConfirmsFirstAndCanBeCalledOff",
@@ -318,6 +387,7 @@
     {
       "id": 15,
       "name": "welcome projects B",
+      "minutes": 6.8,
       "tests": [
         "WelcomeProjectUITests/testOpenFromTheRecentsContextMenuOpensTheProject",
         "WelcomeProjectUITests/testPortValidationMessageAppearsAndClearsWithTheField",
@@ -334,9 +404,46 @@
     },
     {
       "id": 16,
-      "name": "layout audit",
+      "name": "layout audit: request log",
+      "minutes": 8.3,
+      "allowance": 900,
+      "retry": false,
       "tests": [
-        "LayoutAuditUITests"
+        "LayoutAuditUITests/testRequestLogLayout"
+      ]
+    },
+    {
+      "id": 17,
+      "name": "layout audit: endpoints",
+      "minutes": 8.1,
+      "allowance": 900,
+      "retry": false,
+      "tests": [
+        "LayoutAuditUITests/testEndpointsLayout",
+        "LayoutAuditUITests/testWelcomeWindowLayout",
+        "LayoutAuditUITests/testLayoutRulesFlagWhatTheyShould",
+        "LayoutAuditUITests/testBlankSpaceScanMeasuresTheTallestEmptyBand"
+      ]
+    },
+    {
+      "id": 18,
+      "name": "layout audit: empty project",
+      "minutes": 7.4,
+      "allowance": 900,
+      "retry": false,
+      "tests": [
+        "LayoutAuditUITests/testEmptyProjectLayout",
+        "LayoutAuditUITests/testPanelRoundTripsKeepTheirGeometry"
+      ]
+    },
+    {
+      "id": 19,
+      "name": "layout audit: journeys",
+      "minutes": 5.2,
+      "allowance": 900,
+      "retry": false,
+      "tests": [
+        "LayoutAuditUITests/testJourneysLayout"
       ]
     }
   ]

@@ -9,8 +9,9 @@ import Testing
 /// The scores are a report, not a gate: the design is drawn by WebKit and the app by AppKit, so no
 /// section will ever match to the pixel, and a threshold would only move with every font update.
 /// What this suite does assert is that the catalogue and the design manifest agree, and that every
-/// entry draws at its artboard's size. The report lands in `$MIMIC_FIDELITY_REPORT`, or in the
-/// temporary directory, with an `index.html` that shows each section beside its design.
+/// entry draws at its artboard's size. The report runs only when asked for (see `reportIsWanted`)
+/// and lands in `$MIMIC_FIDELITY_REPORT`, or in the temporary directory, with an `index.html` that
+/// shows each section beside its design.
 @Suite("Design fidelity", .serialized)
 @MainActor
 struct DesignFidelityTests {
@@ -93,7 +94,20 @@ struct DesignFidelityTests {
         #expect(GalleryCatalog.entries(matching: "journey").isEmpty)
     }
 
-    @Test("Scoring every section against its artboard writes a report", arguments: SnapshotRenderer.Appearance.allCases)
+    /// Scoring every section takes about two and a half minutes, gates nothing, and checks sizes that
+    /// `GallerySnapshotTests` already holds to the pixel, so it runs only for someone who will read it:
+    /// when `MIMIC_FIDELITY_REPORT` names a folder for the report (CI's full runs, which upload it) or
+    /// `MIMIC_SECTION` asks for one section's scores (the local workflow in CONTRIBUTING.md).
+    nonisolated static var reportIsWanted: Bool {
+        let environment = ProcessInfo.processInfo.environment
+        return ["MIMIC_FIDELITY_REPORT", "MIMIC_SECTION"].contains { !(environment[$0] ?? "").isEmpty }
+    }
+
+    @Test(
+        "Scoring every section against its artboard writes a report",
+        .enabled(if: DesignFidelityTests.reportIsWanted, "Set MIMIC_FIDELITY_REPORT or MIMIC_SECTION to score"),
+        arguments: SnapshotRenderer.Appearance.allCases
+    )
     func writeFidelityReport(appearance: SnapshotRenderer.Appearance) throws {
         let report = FidelityReport(directory: FidelityReport.defaultDirectory())
         // `MIMIC_SECTION` narrows the report to one section; unset, every entry is scored.

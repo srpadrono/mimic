@@ -54,7 +54,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
         )
 
         XCTAssertTrue(
-            app.windows["Mimic"].firstMatch.waitForExistence(timeout: 3),
+            app.windows["Mimic"].firstMatch.waitToExist(timeout: 3),
             "With no project open the window should be titled Mimic"
         )
 
@@ -62,7 +62,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
         // read "Version 1.0" while the bundle had moved on, so both halves are asserted: that the
         // line is there, and that it names something.
         let version = app.staticTexts["welcomeVersionLabel"]
-        XCTAssertTrue(version.waitForExistence(timeout: 3), "The version line should be under the hero title")
+        XCTAssertTrue(version.waitToExist(timeout: 3), "The version line should be under the hero title")
         let versionText = shownText(of: version)
         XCTAssertTrue(
             versionText.hasPrefix("Version "),
@@ -84,20 +84,20 @@ final class WelcomeProjectUITests: MimicUITestCase {
         )
 
         let hint = app.staticTexts["ds.empty.welcome.recents.message"]
-        XCTAssertTrue(hint.waitForExistence(timeout: 3), "The empty state should say how the list gets filled")
+        XCTAssertTrue(hint.waitToExist(timeout: 3), "The empty state should say how the list gets filled")
         XCTAssertTrue(
             shownText(of: hint).contains("Create one"),
             "The empty-state hint should tell the user to create a project, got '\(shownText(of: hint))'"
         )
         // The four start actions of the design.
-        XCTAssertTrue(welcome.openExportButton.waitForExistence(timeout: 3),
+        XCTAssertTrue(welcome.openExportButton.waitToExist(timeout: 3),
                       "The welcome window should offer to open a project export")
         XCTAssertEqual(welcome.openExportButton.label, "Open project export\u{2026}")
-        XCTAssertTrue(welcome.importMenu.waitForExistence(timeout: 3),
+        XCTAssertTrue(welcome.importMenu.waitToExist(timeout: 3),
                       "The welcome window should offer to import a HAR file or an OpenAPI spec")
-        XCTAssertTrue(welcome.sampleProjectButton.waitForExistence(timeout: 3),
+        XCTAssertTrue(welcome.sampleProjectButton.waitToExist(timeout: 3),
                       "The welcome window should offer the sample project")
-        XCTAssertTrue(welcome.showOnLaunchCheckbox.waitForExistence(timeout: 3),
+        XCTAssertTrue(welcome.showOnLaunchCheckbox.waitToExist(timeout: 3),
                       "The recents pane should end with the show-on-launch checkbox")
 
         let screenshot = XCTAttachment(screenshot: app.windows["Mimic"].firstMatch.screenshot())
@@ -129,7 +129,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
                       "Closing the project should give the welcome screen its own size — \(window.frame.size)")
 
         let row = recentsRow(named: "Sized Workspace")
-        XCTAssertTrue(row.waitForExistence(timeout: 5), "The project should be listed in recents")
+        XCTAssertTrue(row.waitToExist(timeout: 5), "The project should be listed in recents")
         row.click()
         XCTAssertTrue(workspace.assertVisible(), "The project should reopen")
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { abs(window.frame.width - workspaceFrame.width) <= 1 },
@@ -148,7 +148,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
 
         let row = recentsRow(named: "Recency Row")
         XCTAssertTrue(
-            row.waitForExistence(timeout: 5),
+            row.waitToExist(timeout: 5),
             "The row should be addressable by the label it reads out, \"Recency Row, last opened …\""
         )
 
@@ -161,7 +161,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
         )
         // The detail line summarises the stored project: its port and what it holds.
         XCTAssertTrue(
-            rowText(in: row, exactly: "Port 8080 \u{00B7} 0 endpoints").waitForExistence(timeout: 5),
+            rowText(in: row, exactly: "Port 8080 \u{00B7} 0 endpoints").waitToExist(timeout: 5),
             "The row should summarise the project's port and endpoints"
         )
         XCTAssertTrue(
@@ -191,7 +191,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
         app.typeKey(.return, modifierFlags: [])
 
         XCTAssertTrue(
-            openedEndpoint(in: "Arrow Older", path: "/older").waitForExistence(timeout: 10),
+            openedEndpoint(in: "Arrow Older", path: "/older").waitToExist(timeout: 10),
             "Return should have opened Arrow Older — the row the arrow keys moved the selection to. "
                 + "If nothing opened, the recents list never took keyboard focus."
         )
@@ -223,7 +223,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
         app.typeKey(.return, modifierFlags: [])
 
         XCTAssertTrue(
-            openedEndpoint(in: "Keyboard Second", path: "/second").waitForExistence(timeout: 10),
+            openedEndpoint(in: "Keyboard Second", path: "/second").waitToExist(timeout: 10),
             "Down to the last row then Up once should select the middle row, Keyboard Second"
         )
         XCTAssertFalse(
@@ -262,7 +262,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
         // *not* exist returned true whether or not anything was deleted. A negative assertion on a
         // query that cannot match is green by construction and evidence about nothing.
         XCTAssertTrue(
-            recentsRow(named: "Fallback Older").waitForNonExistence(timeout: 5),
+            recentsRow(named: "Fallback Older").waitToDisappear(timeout: 5),
             "The deleted project should leave the recents list"
         )
         XCTAssertFalse(
@@ -277,7 +277,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
         app.typeKey(.return, modifierFlags: [])
 
         XCTAssertTrue(
-            openedEndpoint(in: "Fallback Newer", path: "/newer").waitForExistence(timeout: 10),
+            openedEndpoint(in: "Fallback Newer", path: "/newer").waitToExist(timeout: 10),
             "After the selected project was deleted the selection should fall back to the first "
                 + "surviving row, so Return opens Fallback Newer rather than doing nothing"
         )
@@ -290,13 +290,13 @@ final class WelcomeProjectUITests: MimicUITestCase {
     func testSampleProjectOpensWithItsEndpoints() throws {
         launchApp()
 
-        XCTAssertTrue(welcome.sampleProjectButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(welcome.sampleProjectButton.waitToExist(timeout: 5))
         XCTAssertEqual(welcome.sampleProjectButton.label, "Try the sample project")
         welcome.sampleProjectButton.click()
 
         let navigator = NavigatorPage(app: app)
         XCTAssertTrue(
-            navigator.endpointRow(named: "Log in", path: "/login").waitForExistence(timeout: 10),
+            navigator.endpointRow(named: "Log in", path: "/login").waitToExist(timeout: 10),
             "The sample project should open with its endpoints listed"
         )
         XCTAssertTrue(navigator.endpointRow(named: "Product", path: "/products/:id").exists)
@@ -314,16 +314,16 @@ final class WelcomeProjectUITests: MimicUITestCase {
     func testImportFromWelcomeAsksForTheFormatAndCancelCreatesNothing() throws {
         launchApp()
 
-        XCTAssertTrue(welcome.importMenu.waitForExistence(timeout: 5))
+        XCTAssertTrue(welcome.importMenu.waitToExist(timeout: 5))
         welcome.importMenu.click()
         let harItem = welcome.importHARMenuItem
-        XCTAssertTrue(harItem.waitForExistence(timeout: 3), "The import menu should offer a HAR file")
+        XCTAssertTrue(harItem.waitToExist(timeout: 3), "The import menu should offer a HAR file")
         XCTAssertTrue(welcome.importOpenAPIMenuItem.exists,
                       "The import menu should offer an OpenAPI spec")
         harItem.click()
 
         let harImport = HARImportPage(app: app)
-        XCTAssertTrue(harImport.emptyHeading.waitForExistence(timeout: 5),
+        XCTAssertTrue(harImport.emptyHeading.waitToExist(timeout: 5),
                       "Choosing HAR file should open the HAR import sheet")
         harImport.cancelButton.click()
 
@@ -341,7 +341,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
         launchApp()
 
         let checkbox = welcome.showOnLaunchCheckbox
-        XCTAssertTrue(checkbox.waitForExistence(timeout: 5))
+        XCTAssertTrue(checkbox.waitToExist(timeout: 5))
         XCTAssertEqual(checkbox.value as? Int, 0, "Launch restores the last project unless asked not to")
         checkbox.click()
         XCTAssertTrue(
@@ -358,26 +358,26 @@ final class WelcomeProjectUITests: MimicUITestCase {
         createProjectWithEndpoint(named: "Before Rename", path: "/rename-check")
 
         let row = recentsRow(named: "Before Rename")
-        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(row.waitToExist(timeout: 5))
         row.rightClick()
         let renameItem = app.menuItems["Rename\u{2026}"]
-        XCTAssertTrue(renameItem.waitForExistence(timeout: 3))
+        XCTAssertTrue(renameItem.waitToExist(timeout: 3))
         renameItem.click()
 
         let nameField = app.textFields["ds.textfield.projectRename.name"]
-        XCTAssertTrue(nameField.waitForExistence(timeout: 3))
+        XCTAssertTrue(nameField.waitToExist(timeout: 3))
         nameField.click()
         nameField.typeKey("a", modifierFlags: .command)
         nameField.typeText("After Rename")
         app.buttons["projectRename.confirm"].click()
 
         let renamedRow = recentsRow(named: "After Rename")
-        XCTAssertTrue(renamedRow.waitForExistence(timeout: 5), "Renaming should update the welcome list")
+        XCTAssertTrue(renamedRow.waitToExist(timeout: 5), "Renaming should update the welcome list")
         renamedRow.click()
         // Renaming the project leaves the endpoint's own name unchanged.
         XCTAssertTrue(
             NavigatorPage(app: app).endpointRow(named: "Before Rename EP", path: "/rename-check")
-                .waitForExistence(timeout: 10),
+                .waitToExist(timeout: 10),
             "The renamed stored project should reopen with its endpoints"
         )
     }
@@ -399,12 +399,12 @@ final class WelcomeProjectUITests: MimicUITestCase {
         row.rightClick()
 
         let openItem = app.menuItems["Open"]
-        XCTAssertTrue(openItem.waitForExistence(timeout: 3), "The recents context menu should offer Open")
+        XCTAssertTrue(openItem.waitToExist(timeout: 3), "The recents context menu should offer Open")
         openItem.click()
 
         XCTAssertTrue(workspace.assertVisible(), "Open should have opened the project")
         XCTAssertTrue(
-            openedEndpoint(in: "Menu Open", path: "/menuopen").waitForExistence(timeout: 10),
+            openedEndpoint(in: "Menu Open", path: "/menuopen").waitToExist(timeout: 10),
             "The workspace should be showing Menu Open, the project the menu belonged to"
         )
     }
@@ -423,12 +423,12 @@ final class WelcomeProjectUITests: MimicUITestCase {
         row.rightClick()
 
         let duplicateItem = app.menuItems["Duplicate"]
-        XCTAssertTrue(duplicateItem.waitForExistence(timeout: 3), "The context menu should be open")
+        XCTAssertTrue(duplicateItem.waitToExist(timeout: 3), "The context menu should be open")
 
         app.typeKey(.escape, modifierFlags: [])
 
         XCTAssertTrue(
-            duplicateItem.waitForNonExistence(timeout: 3),
+            duplicateItem.waitToDisappear(timeout: 3),
             "Escape should dismiss the recents context menu"
         )
         XCTAssertTrue(
@@ -491,7 +491,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
         deleteConfirmation.keepButton.click()
 
         XCTAssertTrue(
-            deleteConfirmation.deleteButton.waitForNonExistence(timeout: 3),
+            deleteConfirmation.deleteButton.waitToDisappear(timeout: 3),
             "Keep project should dismiss the confirmation"
         )
         XCTAssertNotNil(
@@ -519,7 +519,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
         app.typeKey(.escape, modifierFlags: [])
 
         XCTAssertTrue(
-            deleteConfirmation.deleteButton.waitForNonExistence(timeout: 3),
+            deleteConfirmation.deleteButton.waitToDisappear(timeout: 3),
             "Escape should dismiss the delete confirmation"
         )
         XCTAssertNotNil(
@@ -551,7 +551,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
         row.rightClick()
 
         let duplicateItem = app.menuItems["Duplicate"]
-        XCTAssertTrue(duplicateItem.waitForExistence(timeout: 3), "The context menu should offer Duplicate")
+        XCTAssertTrue(duplicateItem.waitToExist(timeout: 3), "The context menu should offer Duplicate")
         duplicateItem.click()
 
         guard let copy = welcome.findRecentProject(named: "Origin (Copy)") else {
@@ -562,7 +562,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
 
         XCTAssertTrue(workspace.assertVisible(), "The copy should open")
         XCTAssertTrue(
-            openedEndpoint(in: "Origin", path: "/origin").waitForExistence(timeout: 10),
+            openedEndpoint(in: "Origin", path: "/origin").waitToExist(timeout: 10),
             "The copy should carry the original's endpoints"
         )
     }
@@ -586,7 +586,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
 
         duplicateProjectFromRecents(named: "Twin")
         XCTAssertTrue(
-            recentsRow(named: "Twin (Copy)").waitForExistence(timeout: 5),
+            recentsRow(named: "Twin (Copy)").waitToExist(timeout: 5),
             "The first duplicate should appear in recents"
         )
 
@@ -614,14 +614,14 @@ final class WelcomeProjectUITests: MimicUITestCase {
         launchApp()
 
         welcome.newProjectButton.click()
-        XCTAssertTrue(newProjectSheet.nameField.waitForExistence(timeout: 3), "The sheet should open")
+        XCTAssertTrue(newProjectSheet.nameField.waitToExist(timeout: 3), "The sheet should open")
 
         XCTAssertEqual(
             newProjectSheet.portField.value as? String,
             "8080",
             "The port field should open prefilled with 8080"
         )
-        XCTAssertTrue(newProjectSheet.createButton.waitForExistence(timeout: 2))
+        XCTAssertTrue(newProjectSheet.createButton.waitToExist(timeout: 2))
         XCTAssertFalse(
             newProjectSheet.createButton.isEnabled,
             "Create project should be disabled while the name is empty"
@@ -649,12 +649,12 @@ final class WelcomeProjectUITests: MimicUITestCase {
         launchApp()
 
         welcome.newProjectButton.click()
-        XCTAssertTrue(newProjectSheet.nameField.waitForExistence(timeout: 3), "The sheet should open")
+        XCTAssertTrue(newProjectSheet.nameField.waitToExist(timeout: 3), "The sheet should open")
 
         newProjectSheet.nameField.click()
         newProjectSheet.nameField.typeText("   ")
 
-        XCTAssertTrue(newProjectSheet.createButton.waitForExistence(timeout: 2))
+        XCTAssertTrue(newProjectSheet.createButton.waitToExist(timeout: 2))
         XCTAssertFalse(
             newProjectSheet.createButton.isEnabled,
             "A whitespace-only name should leave Create project disabled"
@@ -674,9 +674,10 @@ final class WelcomeProjectUITests: MimicUITestCase {
         newProjectSheet.nameField.click()
         newProjectSheet.nameField.typeText("Trimmed")
 
-        let enabled = NSPredicate(format: "isEnabled == true")
-        expectation(for: enabled, evaluatedWith: newProjectSheet.createButton)
-        waitForExpectations(timeout: 3)
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 3, pollInterval: 0.1) { self.newProjectSheet.createButton.isEnabled },
+            "Create project should enable once the name holds more than spaces"
+        )
         XCTAssertTrue(
             (newProjectSheet.nameField.value as? String)?.contains("Trimmed") == true,
             "The real name should have landed in the same field the spaces did"
@@ -690,16 +691,16 @@ final class WelcomeProjectUITests: MimicUITestCase {
         launchApp()
 
         welcome.newProjectButton.click()
-        XCTAssertTrue(newProjectSheet.portField.waitForExistence(timeout: 3), "The sheet should open")
+        XCTAssertTrue(newProjectSheet.portField.waitToExist(timeout: 3), "The sheet should open")
 
         newProjectSheet.nameField.click()
         newProjectSheet.nameField.typeText("Port Message")
-        XCTAssertTrue(newProjectSheet.createButton.waitForExistence(timeout: 2))
+        XCTAssertTrue(newProjectSheet.createButton.waitToExist(timeout: 2))
 
         replacePortField(with: "70000")
 
         XCTAssertTrue(
-            portValidationMessage.waitForExistence(timeout: 3),
+            portValidationMessage.waitToExist(timeout: 3),
             "An out-of-range port should be explained under the field"
         )
         XCTAssertTrue(
@@ -712,7 +713,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
         clearPortField()
 
         XCTAssertTrue(
-            portValidationMessage.waitForNonExistence(timeout: 3),
+            portValidationMessage.waitToDisappear(timeout: 3),
             "An empty port field should be silent rather than accusing"
         )
         XCTAssertFalse(
@@ -723,7 +724,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
         replacePortField(with: "abc")
 
         XCTAssertTrue(
-            portValidationMessage.waitForExistence(timeout: 3),
+            portValidationMessage.waitToExist(timeout: 3),
             "A non-numeric port should be refused the same way an out-of-range one is"
         )
         XCTAssertFalse(newProjectSheet.createButton.isEnabled, "A non-numeric port should refuse Create")
@@ -742,17 +743,17 @@ final class WelcomeProjectUITests: MimicUITestCase {
         waitForAsyncSave()
 
         let newProjectItem = app.menuItems["New Project\u{2026}"]
-        XCTAssertTrue(newProjectItem.waitForExistence(timeout: 5), "File ▸ New Project… should exist")
+        XCTAssertTrue(newProjectItem.waitToExist(timeout: 5), "File ▸ New Project… should exist")
         newProjectItem.click()
 
-        XCTAssertTrue(newProjectSheet.nameField.waitForExistence(timeout: 5), "The sheet should open")
+        XCTAssertTrue(newProjectSheet.nameField.waitToExist(timeout: 5), "The sheet should open")
         newProjectSheet.nameField.click()
         newProjectSheet.nameField.typeText("Second Project")
-        XCTAssertTrue(newProjectSheet.createButton.waitForExistence(timeout: 2))
+        XCTAssertTrue(newProjectSheet.createButton.waitToExist(timeout: 2))
         newProjectSheet.createButton.click()
 
         XCTAssertTrue(
-            workspace.sidebarEmptyHeading.waitForExistence(timeout: 10),
+            workspace.sidebarEmptyHeading.waitToExist(timeout: 10),
             "The workspace should swap to the new, empty project"
         )
         XCTAssertFalse(
@@ -865,7 +866,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
     @MainActor
     private func focusRecentsList() {
         XCTAssertTrue(
-            recentsList.waitForExistence(timeout: 5),
+            recentsList.waitToExist(timeout: 5),
             "The recents list should be addressable as welcome.recents.list"
         )
         recentsList.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).click()
@@ -889,13 +890,13 @@ final class WelcomeProjectUITests: MimicUITestCase {
 
         let deleteItem = app.menuItems["Delete project\u{2026}"]
         XCTAssertTrue(
-            deleteItem.waitForExistence(timeout: 3),
+            deleteItem.waitToExist(timeout: 3),
             "The recents context menu should offer Delete project…"
         )
         deleteItem.click()
 
         XCTAssertTrue(
-            deleteConfirmation.deleteButton.waitForExistence(timeout: 5),
+            deleteConfirmation.deleteButton.waitToExist(timeout: 5),
             "The delete confirmation should appear"
         )
     }
@@ -912,13 +913,13 @@ final class WelcomeProjectUITests: MimicUITestCase {
     private func duplicateProjectFromRecents(named name: String) {
         let nameText = recentProjectNameText(name)
         XCTAssertTrue(
-            nameText.waitForExistence(timeout: 5),
+            nameText.waitToExist(timeout: 5),
             "\(name) should have a row of its own in recents"
         )
         nameText.rightClick()
 
         let duplicateItem = app.menuItems["Duplicate"]
-        XCTAssertTrue(duplicateItem.waitForExistence(timeout: 3), "The context menu should offer Duplicate")
+        XCTAssertTrue(duplicateItem.waitToExist(timeout: 3), "The context menu should offer Duplicate")
         duplicateItem.click()
     }
 
@@ -943,15 +944,15 @@ final class WelcomeProjectUITests: MimicUITestCase {
     @MainActor
     private func closeProjectMenuItemIsEnabled() -> Bool {
         let fileMenu = app.menuBars.menuBarItems["File"]
-        XCTAssertTrue(fileMenu.waitForExistence(timeout: 5), "The File menu should exist")
+        XCTAssertTrue(fileMenu.waitToExist(timeout: 5), "The File menu should exist")
         fileMenu.click()
 
         let item = app.menuItems["Close Project"]
-        XCTAssertTrue(item.waitForExistence(timeout: 3), "File ▸ Close Project should exist")
+        XCTAssertTrue(item.waitToExist(timeout: 3), "File ▸ Close Project should exist")
         let isEnabled = item.isEnabled
 
         app.typeKey(.escape, modifierFlags: [])
-        // Not `waitForNonExistence`: menu items stay in the accessibility tree with the menu closed —
+        // Not `waitToDisappear`: menu items stay in the accessibility tree with the menu closed —
         // that is why `closeProjectViaMenu` can click one without opening File first. Hittability is
         // what actually tracks the open menu, and waiting on it keeps the next click from landing on
         // a window this one is still covering.
@@ -969,7 +970,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
     @MainActor
     private func staticTextExists(exactly text: String, timeout: TimeInterval = 3) -> Bool {
         let predicate = NSPredicate(format: "value == %@ OR label == %@", text, text)
-        return app.staticTexts.matching(predicate).firstMatch.waitForExistence(timeout: timeout)
+        return app.staticTexts.matching(predicate).firstMatch.waitToExist(timeout: timeout)
     }
 
     /// A header-trait `Text` is published as a heading, not a `StaticText`, so it is matched across
@@ -977,7 +978,7 @@ final class WelcomeProjectUITests: MimicUITestCase {
     @MainActor
     private func headingExists(exactly text: String, timeout: TimeInterval = 3) -> Bool {
         let predicate = NSPredicate(format: "value == %@ OR label == %@", text, text)
-        return app.descendants(matching: .any).matching(predicate).firstMatch.waitForExistence(timeout: timeout)
+        return app.descendants(matching: .any).matching(predicate).firstMatch.waitToExist(timeout: timeout)
     }
 
     @MainActor

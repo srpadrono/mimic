@@ -1,4 +1,5 @@
 import AppKit
+import FeatureSupport
 import Foundation
 
 /// Owns the app's state and its one-time startup for the process's lifetime.
@@ -28,6 +29,10 @@ final class AppSession {
         if MimicScene.shouldResetForTesting(arguments: ProcessInfo.processInfo.arguments) {
             UITestSupport.resetAppIfNeeded()
         }
+        // The sections' sheets size themselves from the screen too, and cannot see `ScreenGeometry`.
+        // Before any window, so the first sheet already reads the pinned height; `nil` unless this
+        // is a pinned UI test launch.
+        ScreenMetrics.pinnedVisibleHeight = UITestSupport.pinnedScreenSize?.height
         #endif
 
         appState = AppState()

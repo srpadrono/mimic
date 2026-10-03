@@ -103,4 +103,16 @@ public nonisolated enum WorkspaceToolbarLayout: Equatable, Sendable {
         case .narrow, .minimal: 100
         }
     }
+
+    /// Names the stage in the ids of the toolbar items whose width depends on it, so each stage gets
+    /// toolbar items of its own; see `WorkspaceToolbar.body`.
+    public var itemKey: String {
+        switch self {
+        case .expanded: "expanded"
+        case .compactSummary: "compactSummary"
+        case .overflow: "overflow"
+        case .narrow: "narrow"
+        case .minimal: "minimal"
+        }
+    }
 }

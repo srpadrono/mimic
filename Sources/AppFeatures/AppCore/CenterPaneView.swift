@@ -113,14 +113,14 @@ struct CenterPaneView: View {
     private func journeyEditor(for journeyID: UUID?) -> some View {
         if let journeyID,
            let journey = appState.journeys.first(where: { $0.id == journeyID }) {
+            // No identifier here: the editor's one accessibility element is its step list, which
+            // would take this name instead of `journeyEditor.stepList` (see `JourneyEditorView.stepList`).
             JourneyEditorView(
                 model: appState,
                 journey: journey,
                 isActive: appState.activeJourney?.id == journey.id,
                 status: appState.activeJourney?.id == journey.id ? appState.activeJourneyStatus : nil
             )
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("center.journeyEditor")
         } else {
             DSEmptyState(
                 systemImage: NavigatorTab.journeys.systemImage,

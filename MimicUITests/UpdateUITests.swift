@@ -26,9 +26,9 @@ final class UpdateUITests: MimicUITestCase {
         installFixture = "success"
         launchApp()
         updateSheet.openFromMenu()
-        XCTAssertTrue(updateSheet.downloadButton.waitForExistence(timeout: 10))
+        XCTAssertTrue(updateSheet.downloadButton.waitToExist(timeout: 10))
         updateSheet.downloadButton.click()
-        XCTAssertTrue(updateSheet.installButton.waitForExistence(timeout: 10))
+        XCTAssertTrue(updateSheet.installButton.waitToExist(timeout: 10))
         captureUpdateEvidence("Ready to quit — simulated installer")
         updateSheet.installButton.click()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 15), "Successful handoff must actually quit Mimic")
@@ -39,11 +39,11 @@ final class UpdateUITests: MimicUITestCase {
         installFixture = "failure"
         launchApp()
         updateSheet.openFromMenu()
-        XCTAssertTrue(updateSheet.downloadButton.waitForExistence(timeout: 10))
+        XCTAssertTrue(updateSheet.downloadButton.waitToExist(timeout: 10))
         updateSheet.downloadButton.click()
-        XCTAssertTrue(updateSheet.installButton.waitForExistence(timeout: 10))
+        XCTAssertTrue(updateSheet.installButton.waitToExist(timeout: 10))
         updateSheet.installButton.click()
-        XCTAssertTrue(updateSheet.failure.waitForExistence(timeout: 10))
+        XCTAssertTrue(updateSheet.failure.waitToExist(timeout: 10))
         XCTAssertTrue(updateSheet.text(of: updateSheet.failure).contains("Fixture handoff refused"))
         XCTAssertNotEqual(app.state, .notRunning)
         captureUpdateEvidence("Installer handoff failure — app remains open")
@@ -64,7 +64,7 @@ final class UpdateUITests: MimicUITestCase {
         launchApp()
 
         XCTAssertTrue(
-            updateSheet.menuItem.waitForExistence(timeout: 5),
+            updateSheet.menuItem.waitToExist(timeout: 5),
             "Mimic ▸ Check for Updates… should exist"
         )
     }
@@ -78,11 +78,11 @@ final class UpdateUITests: MimicUITestCase {
 
         updateSheet.openFromMenu()
 
-        XCTAssertTrue(updateSheet.title.waitForExistence(timeout: 10), "the sheet should appear")
+        XCTAssertTrue(updateSheet.title.waitToExist(timeout: 10), "the sheet should appear")
         let title = updateSheet.text(of: updateSheet.title)
         XCTAssertTrue(title.contains("Mimic 99.0 is available"),
                       "expected the fixture's version, without its zero patch, in the title, got \(title)")
-        XCTAssertTrue(updateSheet.downloadButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(updateSheet.downloadButton.waitToExist(timeout: 5))
         XCTAssertTrue(updateSheet.skipButton.exists)
         XCTAssertTrue(updateSheet.laterButton.exists)
         XCTAssertTrue(updateSheet.notes.exists, "the release notes should be shown")
@@ -99,7 +99,7 @@ final class UpdateUITests: MimicUITestCase {
         feedFixture = UpdateFixtures.available
         launchApp()
         updateSheet.openFromMenu()
-        XCTAssertTrue(updateSheet.downloadButton.waitForExistence(timeout: 10))
+        XCTAssertTrue(updateSheet.downloadButton.waitToExist(timeout: 10))
 
         for button in [updateSheet.skipButton, updateSheet.laterButton, updateSheet.downloadButton] {
             XCTAssertFalse(
@@ -114,12 +114,12 @@ final class UpdateUITests: MimicUITestCase {
         feedFixture = UpdateFixtures.available
         launchApp()
         updateSheet.openFromMenu()
-        XCTAssertTrue(updateSheet.laterButton.waitForExistence(timeout: 10))
+        XCTAssertTrue(updateSheet.laterButton.waitToExist(timeout: 10))
 
         updateSheet.laterButton.click()
 
         XCTAssertTrue(
-            updateSheet.waitForDisappearance(of: updateSheet.title, timeout: 5),
+            updateSheet.title.waitToDisappear(timeout: 5),
             "the sheet should close"
         )
     }
@@ -129,13 +129,13 @@ final class UpdateUITests: MimicUITestCase {
         feedFixture = UpdateFixtures.available
         launchApp()
         updateSheet.openFromMenu()
-        XCTAssertTrue(updateSheet.skipButton.waitForExistence(timeout: 10))
+        XCTAssertTrue(updateSheet.skipButton.waitToExist(timeout: 10))
 
         updateSheet.skipButton.click()
 
-        XCTAssertTrue(updateSheet.waitForDisappearance(of: updateSheet.title, timeout: 5))
+        XCTAssertTrue(updateSheet.title.waitToDisappear(timeout: 5))
         updateSheet.openFromMenu()
-        XCTAssertTrue(updateSheet.downloadButton.waitForExistence(timeout: 10),
+        XCTAssertTrue(updateSheet.downloadButton.waitToExist(timeout: 10),
                       "A manual check must offer the newer version even after it was skipped")
         XCTAssertTrue(updateSheet.text(of: updateSheet.title).contains("Mimic 99.0 is available"))
         XCTAssertFalse(updateSheet.upToDate.exists)
@@ -153,8 +153,8 @@ final class UpdateUITests: MimicUITestCase {
 
         updateSheet.openFromMenu()
 
-        XCTAssertTrue(updateSheet.title.waitForExistence(timeout: 10))
-        XCTAssertTrue(updateSheet.upToDate.waitForExistence(timeout: 5),
+        XCTAssertTrue(updateSheet.title.waitToExist(timeout: 10))
+        XCTAssertTrue(updateSheet.upToDate.waitToExist(timeout: 5),
                       "an up-to-date check should say so rather than closing silently")
         XCTAssertTrue(updateSheet.doneButton.exists)
         XCTAssertFalse(updateSheet.downloadButton.exists, "there is nothing to download")
@@ -171,7 +171,7 @@ final class UpdateUITests: MimicUITestCase {
 
         updateSheet.openFromMenu()
 
-        XCTAssertTrue(updateSheet.failure.waitForExistence(timeout: 10),
+        XCTAssertTrue(updateSheet.failure.waitToExist(timeout: 10),
                       "the sheet should report the failure")
         // Asserting *which* failure, because this test passed for months of a single afternoon while
         // the fixture could not be found at all: every check failed as "could not reach the release
@@ -231,21 +231,9 @@ struct UpdateSheetPage {
     @MainActor
     func openFromMenu() {
         let mimicMenu = app.menuBars.menuBarItems.element(boundBy: 1)
-        XCTAssertTrue(mimicMenu.waitForExistence(timeout: 5), "the Mimic menu should exist")
+        XCTAssertTrue(mimicMenu.waitToExist(timeout: 5), "the Mimic menu should exist")
         mimicMenu.click()
-        XCTAssertTrue(menuItem.waitForExistence(timeout: 5), "Check for Updates… should be in the menu")
+        XCTAssertTrue(menuItem.waitToExist(timeout: 5), "Check for Updates… should be in the menu")
         menuItem.click()
-    }
-
-    /// `waitForExistence` has no negative form, and `!exists` alone races a sheet that is still
-    /// animating out.
-    @MainActor
-    func waitForDisappearance(of element: XCUIElement, timeout: TimeInterval) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if !element.exists { return true }
-            _ = element.waitForExistence(timeout: 0.1)
-        }
-        return !element.exists
     }
 }

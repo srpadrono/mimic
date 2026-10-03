@@ -26,10 +26,7 @@ public struct JourneyEditorView: View {
     @State private var showCaptureSheet = false
 
     public var body: some View {
-        editorStack
-            // `.contain` keeps descendants such as `journeyEditor.name` and `journeyStep-n`
-            // addressable when the centre pane names this container.
-            .accessibilityElement(children: .contain)
+        stepList
             .sheet(isPresented: $showNewStepSheet) {
                 JourneyStepSheet(step: nil, backends: model.currentProject?.serverConfiguration.listeners ?? [],
                     globalDelayMs: model.serverConfiguration.globalDelayMs,
@@ -57,24 +54,6 @@ public struct JourneyEditorView: View {
                     model.addJourneySteps(journeyID: journey.id, capturing: logs)
                 }
             }
-    }
-
-    /// Everything scrolls as one: the title, run and behaviour, then the steps.
-    ///
-    /// This used to be two scroll views stacked — the overview at its natural height above a step
-    /// list that kept a two-step minimum. In a pane shortened by the request log the overview's
-    /// scroll view was cut wherever its share ended, so a row of controls showed as a two-point
-    /// sliver above "Steps", and each half carried its own scroller. One list has one scroller and
-    /// clips nothing it cannot scroll to. It is a list with or without steps: a plain `ScrollView`
-    /// took its content's minimum width, so a pane narrower than the behaviour row was drawn under
-    /// the inspector, with "Add step" beneath the scroller. A list fits the pane and clips instead.
-    ///
-    /// Wrapped so the list keeps its own identifier: as the pane's outermost view it took the
-    /// centre pane's name instead, and the steps lost the container that tests and VoiceOver use.
-    private var editorStack: some View {
-        VStack(spacing: 0) {
-            stepList
-        }
     }
 
     /// Title, run, behaviour and the Steps header: the part above the steps.
@@ -357,6 +336,19 @@ public struct JourneyEditorView: View {
         .buttonStyle(.dsPlain)
     }
 
+    /// Everything scrolls as one: the title, run and behaviour, then the steps.
+    ///
+    /// This used to be two scroll views stacked — the overview at its natural height above a step
+    /// list that kept a two-step minimum. In a pane shortened by the request log the overview's
+    /// scroll view was cut wherever its share ended, so a row of controls showed as a two-point
+    /// sliver above "Steps", and each half carried its own scroller. One list has one scroller and
+    /// clips nothing it cannot scroll to. It is a list with or without steps: a plain `ScrollView`
+    /// took its content's minimum width, so a pane narrower than the behaviour row was drawn under
+    /// the inspector, with "Add step" beneath the scroller. A list fits the pane and clips instead.
+    ///
+    /// The list is the editor's only accessibility element, so nothing outside it may give the editor
+    /// an identifier, with `.contain` or without: SwiftUI merges both into the list, and the outer
+    /// identifier replaces `journeyEditor.stepList`. The centre pane is named in AppKit for that reason.
     private var stepList: some View {
         List {
             // The overview rides in the list as its first row, so it scrolls with the steps. It

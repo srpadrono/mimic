@@ -75,7 +75,7 @@ public struct ImportView: View {
 
     private var preferredHeight: CGFloat {
         if let height { return height }
-        return Self.preferredHeight(visibleScreenHeight: NSScreen.main?.visibleFrame.height ?? 900)
+        return Self.preferredHeight(visibleScreenHeight: ScreenMetrics.visibleHeight(of: NSScreen.main) ?? 900)
     }
 
     static func preferredHeight(visibleScreenHeight: CGFloat) -> CGFloat {

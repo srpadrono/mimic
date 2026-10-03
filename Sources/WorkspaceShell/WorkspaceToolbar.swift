@@ -122,12 +122,22 @@ public struct WorkspaceToolbar<Run: View, RunMenuItem: View, Status: View>: Tool
             }
         }
 
-        ToolbarItem(id: "workspace.identity", placement: .navigation) {
+        // The identity and the status are keyed by the stage, because their width changes with it:
+        // the name gains or loses its subtitle, and the well its counts and the divider before it.
+        // AppKit measures a toolbar item when it is inserted. After the inspector's animated ⌥⌘I
+        // toggle crossed a stage it did not measure these two again, and the new content was laid
+        // into the old widths until a sidebar toggle or a window resize made AppKit lay the toolbar
+        // out afresh. The full well in a slot sized for the compact one spilled over the project
+        // name; a slot left wide pushed the well and "More" behind AppKit's own overflow chevron. An
+        // id per stage makes a new item, and a new item is measured. Run's width never changes, so
+        // its id does not either. The toolbar is not customisable, so no saved arrangement refers to
+        // these ids.
+        ToolbarItem(id: "workspace.identity.\(state.layout.itemKey)", placement: .navigation) {
             WorkspaceProjectIdentity(state: state)
         }
         .sharedBackgroundVisibility(.hidden)
 
-        ToolbarItem(id: "workspace.status", placement: .navigation) {
+        ToolbarItem(id: "workspace.status.\(state.layout.itemKey)", placement: .navigation) {
             // Its own item, and wrapped rather than rooted at the well's `Button`. A bare button as
             // an item's root is published as the item itself, and so is a button sharing an item
             // with other views: the project name beside it then left the accessibility tree, and

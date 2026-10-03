@@ -15,7 +15,10 @@ what it was given. So the shard list is checked against the tree rather than tru
   - a shard naming a class or method that **does not exist** fails — `xcodebuild` can otherwise
     report "no tests to run" and exit 0;
   - a shard with no selectors, or an id that is not a unique integer, fails: an empty leg would run
-    every UI test, and a repeated id would overwrite another shard's result artifacts.
+    every UI test, and a repeated id would overwrite another shard's result artifacts;
+  - a shard without its measured `minutes` fails: the plan queues the longest shard first, and a
+    missing figure would quietly sort it last. An `allowance` (seconds one test may run) must be a
+    whole number of at least a minute, and `retry` must be true or false.
 
 `--self-test` drives the verdicts over fixtures written in this file, never read off disk and never
 produced by the functions under test. If the mechanism this test is for were reverted, it would go
@@ -44,6 +47,9 @@ TEST_FUNC = re.compile(
     r"^\s+(?:@\w+\s+)*(?:final\s+|public\s+|private\s+|internal\s+)*func\s+"
     r"(test[A-Za-z0-9_]+)\s*\("
 )
+
+# XCTest rounds an execution time allowance up to whole minutes and refuses less than one.
+MIN_ALLOWANCE = 60
 
 
 def suite_methods(sources):
@@ -82,6 +88,16 @@ def check(shards, sources):
         if not isinstance(shard_id, int) or isinstance(shard_id, bool) or shard_id in seen_ids:
             problems.append(f"UI shard id {shard_id!r} must be a unique integer for result artifacts.")
         seen_ids.add(shard_id)
+        minutes = shard.get("minutes")
+        if not isinstance(minutes, (int, float)) or isinstance(minutes, bool) or minutes <= 0:
+            problems.append(f"UI shard {shard_id} needs its measured job time in minutes, a positive number.")
+        allowance = shard.get("allowance", MIN_ALLOWANCE)
+        if not isinstance(allowance, int) or isinstance(allowance, bool) or allowance < MIN_ALLOWANCE:
+            problems.append(f"UI shard {shard_id} has allowance {allowance!r}; it must be whole seconds, "
+                            f"at least {MIN_ALLOWANCE}.")
+        if not isinstance(shard.get("retry", True), bool):
+            problems.append(f"UI shard {shard_id} has retry {shard.get('retry')!r}; it must be true or "
+                            "false.")
         selectors = shard.get("tests") or []
         if not selectors:
             problems.append(f"UI shard {shard_id} has no selectors; it would run every test.")
@@ -118,26 +134,28 @@ def check(shards, sources):
 
 
 def report_balance(shards, tests):
-    """Prints per-shard totals. Informational: test count is not elapsed time."""
+    """Prints per-shard totals. Informational: the minutes are the last measurement, not a promise."""
     totals = []
     for shard in shards:
         count = 0
         for selector in shard.get("tests") or []:
             name, _, method = selector.partition("/")
             count += 1 if method else tests.get(name, 0)
-        totals.append((shard.get("id"), shard.get("name", ""), count))
+        totals.append((shard.get("id"), shard.get("name", ""), count, shard.get("minutes")))
     if not totals:
         return
-    print(f"UI shards ({sum(n for _i, _n, n in totals)} tests across {len(totals)}):")
-    for shard_id, name, total in totals:
-        print(f"  shard {shard_id:>2} {name:32} {total:3d} tests")
+    print(f"UI shards ({sum(t[2] for t in totals)} tests across {len(totals)}):")
+    for shard_id, name, total, minutes in totals:
+        measured = f"{minutes:5.1f} min" if isinstance(minutes, (int, float)) else "    ? min"
+        print(f"  shard {shard_id:>2} {name:32} {total:3d} tests {measured}")
 
 
 # --- self-test ---------------------------------------------------------------------------------
 
 GOOD_SHARDS = [
-    {"id": 1, "name": "one", "tests": ["AlphaUITests", "BetaUITests/testOne"]},
-    {"id": 2, "name": "two", "tests": ["BetaUITests/testTwo", "GammaUITests"]},
+    {"id": 1, "name": "one", "minutes": 7.5, "tests": ["AlphaUITests", "BetaUITests/testOne"]},
+    {"id": 2, "name": "two", "minutes": 4, "allowance": 600, "retry": False,
+     "tests": ["BetaUITests/testTwo", "GammaUITests"]},
 ]
 
 GOOD_SOURCES = [
@@ -197,7 +215,7 @@ def self_test():
     expect("a class selector overlapping a method selector fails",
            len(problems) == 1 and "BetaUITests" in problems[0] and "more than once" in problems[0], problems)
 
-    problems, _ = check(GOOD_SHARDS + [{"id": 3, "name": "empty", "tests": []}], GOOD_SOURCES)
+    problems, _ = check(GOOD_SHARDS + [{"id": 3, "name": "empty", "minutes": 1, "tests": []}], GOOD_SOURCES)
     expect("an empty shard fails instead of running every UI test",
            len(problems) == 1 and "no selectors" in problems[0], problems)
 
@@ -215,6 +233,21 @@ def self_test():
 
     problems, _ = check([], GOOD_SOURCES)
     expect("an empty shard list fails for every class", len(problems) == 3, problems)
+
+    unmeasured = [{k: v for k, v in GOOD_SHARDS[0].items() if k != "minutes"}, GOOD_SHARDS[1]]
+    problems, _ = check(unmeasured, GOOD_SOURCES)
+    expect("a shard without measured minutes fails",
+           len(problems) == 1 and "minutes" in problems[0], problems)
+
+    problems, _ = check([dict(GOOD_SHARDS[0], minutes=0), GOOD_SHARDS[1]], GOOD_SOURCES)
+    expect("a shard measured at zero minutes fails",
+           len(problems) == 1 and "minutes" in problems[0], problems)
+
+    problems, _ = check([GOOD_SHARDS[0], dict(GOOD_SHARDS[1], allowance=30)], GOOD_SOURCES)
+    expect("an allowance under a minute fails", len(problems) == 1 and "allowance" in problems[0], problems)
+
+    problems, _ = check([GOOD_SHARDS[0], dict(GOOD_SHARDS[1], retry="no")], GOOD_SOURCES)
+    expect("a retry that is not a boolean fails", len(problems) == 1 and "retry" in problems[0], problems)
 
     if failures:
         print(f"\n{len(failures)} self-test failure(s). The checker is not trustworthy — fix it "

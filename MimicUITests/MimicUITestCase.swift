@@ -31,7 +31,13 @@ class MimicUITestCase: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        UserDefaults(suiteName: Self.testSuite)?.removePersistentDomain(forName: Self.testSuite)
+        // XCTest calls this on the main thread.
+        MainActor.assumeIsolated { UITestEnvironment.failUnlessDisplayFitsPinnedScreen() }
+        // No reset of `testSuite` from here. This used to remove it, but the app is sandboxed, so
+        // its copy of the suite lives in its own container, and the runner's removal reached a
+        // different file (~/Library/Preferences, as this target is not sandboxed) that nothing
+        // writes. The app clears its own copy at launch (`UITestSupport.resetAppIfNeeded`), before
+        // anything reads it.
     }
 
     override func tearDownWithError() throws {
@@ -93,7 +99,8 @@ class MimicUITestCase: XCTestCase {
     func launchApp() {
         prepareApp()
         XCTAssertTrue(
-            UITestApp.launchAndBringToForeground(app) { self.welcome.assertVisible(timeout: 1) },
+            // A timeout of 0 looks once: the launch loop does the polling.
+            UITestApp.launchAndBringToForeground(app) { self.welcome.assertVisible(timeout: 0) },
             "Welcome screen should be accessible after repeated activation attempts"
         )
     }
@@ -121,19 +128,26 @@ class MimicUITestCase: XCTestCase {
     // MARK: - State builders
 
     /// Creates a project via the UI and waits for the workspace to appear.
+    ///
+    /// The sheet is opened with `UITestApp.click(_:expecting:)`, like every click here that opens
+    /// something: it used to be clicked and waited for without an assertion, so a sheet that never
+    /// opened surfaced as a failed click on a name field that was not there.
     @MainActor
     func createProjectViaUI(name: String, port: Int? = nil) {
-        welcome.newProjectButton.click()
-        _ = newProjectSheet.nameField.waitForExistence(timeout: 3)
+        let newProject = welcome.newProjectButton
+        XCTAssertTrue(
+            UITestApp.click(newProject, expecting: { self.newProjectSheet.nameField.exists }),
+            "New project should open its sheet — the button is \(UITestApp.describe(newProject))"
+        )
         newProjectSheet.nameField.click()
         newProjectSheet.nameField.typeText(name)
         if let port {
-            _ = newProjectSheet.portField.waitForExistence(timeout: 2)
+            _ = newProjectSheet.portField.waitToExist(timeout: 2)
             newProjectSheet.portField.click()
             newProjectSheet.portField.typeKey("a", modifierFlags: .command)
             newProjectSheet.portField.typeText(String(port))
         }
-        _ = newProjectSheet.createButton.waitForExistence(timeout: 2)
+        _ = newProjectSheet.createButton.waitToExist(timeout: 2)
         newProjectSheet.createButton.click()
         _ = workspace.assertVisible()
     }
@@ -148,9 +162,12 @@ class MimicUITestCase: XCTestCase {
         // Opening or creating a project can preserve a collapsed navigator. The endpoint action
         // lives in that navigator, so make the page object restore it before querying the button.
         workspace.showSidebarIfNeeded()
-        XCTAssertTrue(workspace.addEndpointButton.waitForExistence(timeout: 5), "Add endpoint should be reachable")
-        workspace.addEndpointButton.click()
-        _ = newEndpointSheet.nameField.waitForExistence(timeout: 3)
+        XCTAssertTrue(workspace.addEndpointButton.waitToExist(timeout: 5), "Add endpoint should be reachable")
+        let addEndpoint = workspace.addEndpointButton
+        XCTAssertTrue(
+            UITestApp.click(addEndpoint, expecting: { self.newEndpointSheet.nameField.exists }),
+            "Add endpoint should open the new-endpoint sheet — it is \(UITestApp.describe(addEndpoint))"
+        )
         newEndpointSheet.nameField.click()
         newEndpointSheet.nameField.typeText(name)
         newEndpointSheet.pathField.click()
@@ -162,28 +179,36 @@ class MimicUITestCase: XCTestCase {
         }
 
         newEndpointSheet.createButton.click()
-        _ = endpointEditor.pathLabel.waitForExistence(timeout: 5)
+        _ = endpointEditor.pathLabel.waitToExist(timeout: 5)
     }
 
-    /// Picks a method in the new-endpoint sheet.
+    /// Picks a method in the new-endpoint sheet, and proves it took by the picker's value.
     ///
     /// The method is a menu button inside the request field, so the menu has to be opened before its
-    /// items exist — `app.menuItems` matches nothing while it is closed.
+    /// items exist — `app.menuItems` matches nothing while it is closed. Through
+    /// `UITestApp.chooseMenuOption`, not a click on the item: a menu item is looked up twice per
+    /// click, and the open menu can move between the two, which left a journey picker on the value
+    /// it already had (run 37147249690). The picker's accessibility value is the method it shows, so
+    /// the choice is checked rather than assumed; before, a click on the wrong row went unnoticed
+    /// until something later read the endpoint's method.
     @MainActor
     func selectMethod(_ method: String) {
         let picker = newEndpointSheet.methodPicker
-        XCTAssertTrue(picker.waitForExistence(timeout: 2), "The requested HTTP method must be selectable")
-        picker.click()
-        let item = app.menuItems[method]
-        XCTAssertTrue(item.waitForExistence(timeout: 2), "The method picker must offer \(method)")
-        item.click()
+        XCTAssertTrue(picker.waitToExist(timeout: 2), "The requested HTTP method must be selectable")
+        XCTAssertTrue(
+            UITestApp.chooseMenuOption(method, in: picker, of: app) {
+                picker.exists && (picker.value as? String) == method
+            },
+            "The method picker must offer \(method) and show it once chosen — it reads "
+                + "\"\(UITestApp.spoken(picker))\", and \(UITestApp.describeOpenMenus(in: app))"
+        )
     }
 
     /// Closes the open project via File ▸ Close Project, returning to the welcome window.
     @MainActor
     func closeProjectViaMenu() {
         let item = app.menuItems["Close Project"]
-        XCTAssertTrue(item.waitForExistence(timeout: 5), "File ▸ Close Project should exist")
+        XCTAssertTrue(item.waitToExist(timeout: 5), "File ▸ Close Project should exist")
         item.click()
     }
 
@@ -227,8 +252,8 @@ class MimicUITestCase: XCTestCase {
             [workspace.autosaveSavingIndicator, workspace.autosaveSavedIndicator],
             timeout: 4
         ) {
-            _ = workspace.autosaveSavedIndicator.waitForExistence(timeout: 4)
-            _ = workspace.autosaveSavingIndicator.waitForNonExistence(timeout: 4)
+            _ = workspace.autosaveSavedIndicator.waitToExist(timeout: 4)
+            _ = workspace.autosaveSavingIndicator.waitToDisappear(timeout: 4)
         }
     }
 

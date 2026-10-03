@@ -214,15 +214,14 @@ public struct RequestLogDrawerView: View {
                     }
                 } else {
                     // The request on its own takes the list's focus and keys, so the arrows still
-                    // step through the log and Escape brings the list back.
+                    // step through the log and Escape brings the list back. Focus arrives through
+                    // the `onAppear` and the arrangement's `onChange` below.
                     let displayOrder = sortedAndFilteredLogs.map(\.id)
                     selectedRequestDetail
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .focusable()
                         .focusEffectDisabled()
                         .focused($tableHasKeyboardFocus)
-                        // The row that was clicked went away with the list; its focus moves here.
-                        .onAppear { tableHasKeyboardFocus = true }
                         .onKeyPress(keys: [.upArrow, .downArrow, .return, .escape, "a"], phases: [.down, .repeat]) { press in
                             handleKeyPress(press, displayOrder: displayOrder, proxy: nil)
                         }
@@ -243,6 +242,22 @@ public struct RequestLogDrawerView: View {
         // the count never changes while the log keeps rotating.
         .onChange(of: requestLogs.last?.id) { _, _ in updateLogs() }
         .onChange(of: endpoints) { _, _ in updateLogs() }
+        // Opening a request hides the inspector with AppKit's own animation, so in a window about
+        // 900-1200pt wide (CI's 1024pt display, a laptop) the column starts too narrow for the list
+        // beside the request, shows the request alone, and widens into list and request most of a
+        // second later. The view holding the keys leaves with the old arrangement, SwiftUI clears
+        // its focus, and nothing gave it back: the arrows and Escape went nowhere until a row was
+        // clicked again. So hand it to whichever target replaced it, the list's or the lone
+        // request's. Here, on the stack both arrangements live in: a modifier on either one is
+        // replaced with it and never sees the change. Not while the filter field holds the keys.
+        .onChange(of: LogColumns.showsListBesideDetail(totalWidth: width)) { _, _ in
+            guard showsDetail else { return }
+            // On the next turn, once the new arrangement and its focus target are in the window.
+            Task { @MainActor in
+                guard !filterFieldIsFocused else { return }
+                tableHasKeyboardFocus = true
+            }
+        }
         .onAppear {
             updateLogs()
             // The click that opened this arrangement was a click in the table, so the arrows carry

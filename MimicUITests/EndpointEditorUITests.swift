@@ -193,7 +193,7 @@ final class EndpointEditorUITests: MimicUITestCase {
     ///
     /// Expanded endpoint options can extend below the viewport in a short window. An element
     /// scrolled out of a clip view still *exists* in the accessibility
-    /// tree, so `waitForExistence` says yes and `click()` then lands on whatever is actually at that
+    /// tree, so `waitToExist` says yes and `click()` then lands on whatever is actually at that
     /// screen point. `isHittable` is the question that distinguishes the two.
     ///
     /// Both scroll directions are tried because `scroll(byDeltaX:deltaY:)`'s sign convention is a
@@ -202,7 +202,7 @@ final class EndpointEditorUITests: MimicUITestCase {
     @MainActor
     @discardableResult
     private func revealInEditor(_ element: XCUIElement, timeout: TimeInterval = 5) -> Bool {
-        guard element.waitForExistence(timeout: timeout) else { return false }
+        guard element.waitToExist(timeout: timeout) else { return false }
         if element.isHittable { return true }
 
         let scroller = editorScrollView
@@ -224,7 +224,7 @@ final class EndpointEditorUITests: MimicUITestCase {
     private func hideRequestLogDrawer() {
         guard workspace.drawerEmptyHeading.exists else { return }
         app.typeKey("l", modifierFlags: [.command, .option])
-        XCTAssertTrue(workspace.drawerEmptyHeading.waitForNonExistence(timeout: 3),
+        XCTAssertTrue(workspace.drawerEmptyHeading.waitToDisappear(timeout: 3),
                       "The request log shortcut should close the drawer")
     }
 
@@ -232,9 +232,9 @@ final class EndpointEditorUITests: MimicUITestCase {
     /// A CI run found the row but failed inside XCTest's automatic ScrollView-to-visible gesture.
     @MainActor
     private func rightClickScenarioRow(_ row: XCUIElement, named name: String) {
-        XCTAssertTrue(row.waitForExistence(timeout: 5), "\(name) should be in the scenario list")
+        XCTAssertTrue(row.waitToExist(timeout: 5), "\(name) should be in the scenario list")
         let list = inspector.element("inspector.scenarioList")
-        XCTAssertTrue(list.waitForExistence(timeout: 5), "The inspector should show its scenario list")
+        XCTAssertTrue(list.waitToExist(timeout: 5), "The inspector should show its scenario list")
 
         func rowIsVisible() -> Bool {
             let viewport = list.frame.intersection(app.windows.firstMatch.frame)
@@ -272,7 +272,7 @@ final class EndpointEditorUITests: MimicUITestCase {
     /// "reachable". A gate a working control cannot pass is not measuring reachability.
     ///
     /// What that gate was written to catch is real, and this catches it directly. An element scrolled
-    /// out of the clip view still answers `waitForExistence`, and `click()` on macOS lands on
+    /// out of the clip view still answers `waitToExist`, and `click()` on macOS lands on
     /// whatever is at the point rather than refusing — so the way to know the field was reached is to
     /// read it back. A click that went anywhere else fails here, naming what the field holds and
     /// where it is, instead of surfacing three assertions later as "the tag never committed".
@@ -281,7 +281,7 @@ final class EndpointEditorUITests: MimicUITestCase {
     /// it is just not worth *asserting*.
     @MainActor
     private func typeIntoEditorField(_ field: XCUIElement, _ text: String, _ what: String) {
-        XCTAssertTrue(field.waitForExistence(timeout: 5), "\(what) should be in the editor")
+        XCTAssertTrue(field.waitToExist(timeout: 5), "\(what) should be in the editor")
         revealInEditor(field)
 
         field.click()
@@ -531,7 +531,7 @@ final class EndpointEditorUITests: MimicUITestCase {
     @MainActor
     private func setResponseBody(_ json: String, expecting fragment: String) {
         let editor = bodyTextView()
-        XCTAssertTrue(editor.waitForExistence(timeout: 5),
+        XCTAssertTrue(editor.waitToExist(timeout: 5),
                       "The response body editor should be present in the editor pane")
         revealInEditor(editor)
 
@@ -597,12 +597,12 @@ final class EndpointEditorUITests: MimicUITestCase {
         createProjectViaUI(name: "Chooser Row")
         workspace.fillWindow()
 
-        XCTAssertTrue(workspace.centerFirstEndpointHeading.waitForExistence(timeout: 5),
+        XCTAssertTrue(workspace.centerFirstEndpointHeading.waitToExist(timeout: 5),
                       "The headline should lead the empty project's centre")
         let add = workspace.centerAddEndpointCard
         let har = workspace.centerImportHARCard
         let openAPI = workspace.centerImportOpenAPICard
-        XCTAssertTrue(add.waitForExistence(timeout: 5))
+        XCTAssertTrue(add.waitToExist(timeout: 5))
         XCTAssertTrue(har.exists && openAPI.exists)
 
         let heading = workspace.centerFirstEndpointHeading.frame
@@ -632,19 +632,19 @@ final class EndpointEditorUITests: MimicUITestCase {
         launchApp()
         createProjectViaUI(name: "Add Buttons")
 
-        XCTAssertTrue(workspace.sidebarEmptyHeading.waitForExistence(timeout: 5),
+        XCTAssertTrue(workspace.sidebarEmptyHeading.waitToExist(timeout: 5),
                       "A fresh project should show the sidebar's empty state")
-        XCTAssertTrue(workspace.centerFirstEndpointHeading.waitForExistence(timeout: 5),
+        XCTAssertTrue(workspace.centerFirstEndpointHeading.waitToExist(timeout: 5),
                       "The centre pane should invite the first endpoint")
         XCTAssertEqual(addEndpointButtonCount, 2,
                        "An empty project offers 'Add endpoint' twice — the centre card and the navigator footer")
 
-        XCTAssertTrue(emptyStateAddEndpointButton.waitForExistence(timeout: 3),
+        XCTAssertTrue(emptyStateAddEndpointButton.waitToExist(timeout: 3),
                       "The first-endpoint chooser's Add endpoint card should exist")
         XCTAssertTrue(workspace.centerImportHARCard.exists, "The chooser should offer Import HAR beside it")
         XCTAssertTrue(workspace.centerImportOpenAPICard.exists, "…and Import OpenAPI")
         emptyStateAddEndpointButton.click()
-        XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 5),
+        XCTAssertTrue(newEndpointSheet.nameField.waitToExist(timeout: 5),
                       "The chooser's 'Add endpoint' should open the new-endpoint sheet")
 
         newEndpointSheet.nameField.click()
@@ -654,7 +654,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         newEndpointSheet.pathField.typeText("/api/first")
         newEndpointSheet.createButton.click()
 
-        XCTAssertTrue(endpointEditor.pathLabel.waitForExistence(timeout: 5),
+        XCTAssertTrue(endpointEditor.pathLabel.waitToExist(timeout: 5),
                       "Creating from the empty state should open the endpoint in the editor")
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) { self.addEndpointButtonCount == 1 },
@@ -663,10 +663,10 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertFalse(emptyStateAddEndpointButton.exists, "The first-endpoint chooser should be gone")
 
         // And the survivor is the footer's, which is the button SIDEBAR-04 is about.
-        XCTAssertTrue(navigatorAddEndpointButton.waitForExistence(timeout: 3),
+        XCTAssertTrue(navigatorAddEndpointButton.waitToExist(timeout: 3),
                       "The navigator footer should still offer 'Add endpoint'")
         navigatorAddEndpointButton.click()
-        XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 5),
+        XCTAssertTrue(newEndpointSheet.nameField.waitToExist(timeout: 5),
                       "The navigator's '+' should open the new-endpoint sheet")
         app.typeKey(.escape, modifierFlags: [])
     }
@@ -683,7 +683,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         createProjectViaUI(name: "Path Validation")
 
         workspace.addEndpointButton.click()
-        XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 5),
+        XCTAssertTrue(newEndpointSheet.nameField.waitToExist(timeout: 5),
                       "The new-endpoint sheet should appear")
         XCTAssertFalse(newEndpointSheet.createButton.isEnabled,
                        "'Add endpoint' should be disabled while the name is blank")
@@ -725,9 +725,9 @@ final class EndpointEditorUITests: MimicUITestCase {
         )
 
         app.typeKey(.escape, modifierFlags: [])
-        XCTAssertTrue(newEndpointSheet.nameField.waitForNonExistence(timeout: 3),
+        XCTAssertTrue(newEndpointSheet.nameField.waitToDisappear(timeout: 3),
                       "Escape should dismiss the new-endpoint sheet")
-        XCTAssertTrue(workspace.sidebarEmptyHeading.waitForExistence(timeout: 3),
+        XCTAssertTrue(workspace.sidebarEmptyHeading.waitToExist(timeout: 3),
                       "Dismissing the sheet should leave the project without endpoints")
     }
 
@@ -742,7 +742,7 @@ final class EndpointEditorUITests: MimicUITestCase {
 
         workspace.showSidebarIfNeeded()
         workspace.addEndpointButton.click()
-        XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 5),
+        XCTAssertTrue(newEndpointSheet.nameField.waitToExist(timeout: 5),
                       "The new-endpoint sheet should appear")
         newEndpointSheet.nameField.click()
         newEndpointSheet.nameField.typeText("Get product")
@@ -750,11 +750,11 @@ final class EndpointEditorUITests: MimicUITestCase {
         newEndpointSheet.pathField.typeKey("a", modifierFlags: .command)
         newEndpointSheet.pathField.typeText("/products/:id")
 
-        XCTAssertTrue(newEndpointSheet.groupField.waitForExistence(timeout: 3), "The sheet should offer a group")
+        XCTAssertTrue(newEndpointSheet.groupField.waitToExist(timeout: 3), "The sheet should offer a group")
         newEndpointSheet.groupField.click()
         newEndpointSheet.groupField.typeText("Catalog")
 
-        XCTAssertTrue(newEndpointSheet.statusMenu.waitForExistence(timeout: 3), "The sheet should offer a status")
+        XCTAssertTrue(newEndpointSheet.statusMenu.waitToExist(timeout: 3), "The sheet should offer a status")
         XCTAssertTrue(
             UITestApp.chooseFromPopUp(
                 in: app,
@@ -770,7 +770,7 @@ final class EndpointEditorUITests: MimicUITestCase {
             "The sheet should show the status chosen from its menu\n\(app.sheets.firstMatch.debugDescription)"
         )
 
-        XCTAssertTrue(newEndpointSheet.contentTypeMenu.waitForExistence(timeout: 3),
+        XCTAssertTrue(newEndpointSheet.contentTypeMenu.waitToExist(timeout: 3),
                       "The sheet should offer a content type")
         XCTAssertTrue(
             UITestApp.chooseFromPopUp(
@@ -786,10 +786,10 @@ final class EndpointEditorUITests: MimicUITestCase {
         )
 
         newEndpointSheet.createButton.click()
-        XCTAssertTrue(newEndpointSheet.nameField.waitForNonExistence(timeout: 5),
+        XCTAssertTrue(newEndpointSheet.nameField.waitToDisappear(timeout: 5),
                       "Adding the endpoint should close the sheet")
 
-        XCTAssertTrue(endpointEditor.statusCodeField.waitForExistence(timeout: 5))
+        XCTAssertTrue(endpointEditor.statusCodeField.waitToExist(timeout: 5))
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) {
                 (self.endpointEditor.statusCodeField.value as? String) == "404"
@@ -814,7 +814,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         launchApp()
         createProjectViaUI(name: "Route validation")
         workspace.addEndpointButton.click()
-        XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 5))
+        XCTAssertTrue(newEndpointSheet.nameField.waitToExist(timeout: 5))
         newEndpointSheet.nameField.click()
         newEndpointSheet.nameField.typeText("Encoded route")
 
@@ -845,7 +845,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertEqual(newEndpointSheet.pathField.value as? String, "/api/users/:id/a%20b%3Fc%23d")
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.newEndpointSheet.createButton.isEnabled })
         app.typeKey(.return, modifierFlags: [])
-        XCTAssertTrue(newEndpointSheet.nameField.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(newEndpointSheet.nameField.waitToDisappear(timeout: 5))
         XCTAssertTrue(waitForSidebarRowCount(1))
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
             self.shownText(of: self.endpointEditor.pathLabel).contains("/api/users/:id/a%20b%3Fc%23d")
@@ -859,17 +859,17 @@ final class EndpointEditorUITests: MimicUITestCase {
         createProjectViaUI(name: "Sheet Keys")
 
         workspace.addEndpointButton.click()
-        XCTAssertTrue(newEndpointSheet.cancelButton.waitForExistence(timeout: 5),
+        XCTAssertTrue(newEndpointSheet.cancelButton.waitToExist(timeout: 5),
                       "The new-endpoint sheet should offer Cancel")
         newEndpointSheet.cancelButton.click()
 
-        XCTAssertTrue(newEndpointSheet.nameField.waitForNonExistence(timeout: 3),
+        XCTAssertTrue(newEndpointSheet.nameField.waitToDisappear(timeout: 3),
                       "Cancel should dismiss the sheet")
-        XCTAssertTrue(workspace.sidebarEmptyHeading.waitForExistence(timeout: 3),
+        XCTAssertTrue(workspace.sidebarEmptyHeading.waitToExist(timeout: 3),
                       "Cancel should create nothing")
 
         workspace.addEndpointButton.click()
-        XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 5))
+        XCTAssertTrue(newEndpointSheet.nameField.waitToExist(timeout: 5))
         newEndpointSheet.nameField.click()
         newEndpointSheet.nameField.typeText("Return Endpoint")
         newEndpointSheet.pathField.click()
@@ -878,7 +878,7 @@ final class EndpointEditorUITests: MimicUITestCase {
 
         app.typeKey(.return, modifierFlags: [])
 
-        XCTAssertTrue(endpointEditor.pathLabel.waitForExistence(timeout: 5),
+        XCTAssertTrue(endpointEditor.pathLabel.waitToExist(timeout: 5),
                       "Return should submit the sheet and open the endpoint in the editor")
         XCTAssertTrue(waitForSidebarRowCount(1),
                       "Return should have created exactly one endpoint")
@@ -901,7 +901,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         // A menu's label is flattened into the menu's own AX element, so the method is read from
         // the menu's name, "Endpoint actions, POST", not from a separate badge.
         let menu = endpointEditor.moreMenu
-        XCTAssertTrue(menu.waitForExistence(timeout: 5),
+        XCTAssertTrue(menu.waitToExist(timeout: 5),
                       "The request bar should show the endpoint's method")
         let isPost = UITestApp.waitUntil(timeout: 5) {
             "\(menu.title)|\(self.shownText(of: menu))".contains("POST")
@@ -927,21 +927,21 @@ final class EndpointEditorUITests: MimicUITestCase {
 
         // Headers are the second pane of the Body/Headers switch, not a section below the body.
         endpointEditor.showHeaders()
-        XCTAssertTrue(headersEmptyNote.waitForExistence(timeout: 5),
+        XCTAssertTrue(headersEmptyNote.waitToExist(timeout: 5),
                       "A new endpoint's scenario carries no headers, so the pane should say so")
 
-        XCTAssertTrue(addHeaderButton.waitForExistence(timeout: 5),
+        XCTAssertTrue(addHeaderButton.waitToExist(timeout: 5),
                       "The Headers pane should offer 'Add header'")
         revealInEditor(addHeaderButton)
         addHeaderButton.click()
 
-        XCTAssertTrue(headersEmptyNote.waitForNonExistence(timeout: 3),
+        XCTAssertTrue(headersEmptyNote.waitToDisappear(timeout: 3),
                       "Adding a row should replace the 'No custom headers' state")
 
         let key = endpointEditor.headerKeyField(at: 0)
         let value = endpointEditor.headerValueField(at: 0)
-        XCTAssertTrue(key.waitForExistence(timeout: 5), "A header name field should appear")
-        XCTAssertTrue(value.waitForExistence(timeout: 5), "A header value field should appear")
+        XCTAssertTrue(key.waitToExist(timeout: 5), "A header name field should appear")
+        XCTAssertTrue(value.waitToExist(timeout: 5), "A header value field should appear")
 
         revealInEditor(key)
         key.click()
@@ -965,14 +965,14 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertTrue(workspace.assertVisible())
 
         let path = workspace.endpointPathText("/api/headers")
-        XCTAssertTrue(path.waitForExistence(timeout: 5),
+        XCTAssertTrue(path.waitToExist(timeout: 5),
                       "The endpoint should be in the sidebar after reopening")
         path.click()
 
         // The pane choice is view state; a reopened editor starts on Body.
         endpointEditor.showHeaders()
         let reopenedKey = endpointEditor.headerKeyField(at: 0)
-        XCTAssertTrue(reopenedKey.waitForExistence(timeout: 5),
+        XCTAssertTrue(reopenedKey.waitToExist(timeout: 5),
                       "The reopened endpoint should still have a header row")
         XCTAssertEqual(reopenedKey.value as? String, "X-Mimic-Source",
                        "The header name should have been committed to the active scenario")
@@ -995,7 +995,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         hideRequestLogDrawer()
 
         endpointEditor.showHeaders()
-        XCTAssertTrue(addHeaderButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(addHeaderButton.waitToExist(timeout: 5))
         revealInEditor(addHeaderButton)
 
         let names = ["Alpha", "Bravo", "Charlie"]
@@ -1003,7 +1003,7 @@ final class EndpointEditorUITests: MimicUITestCase {
             revealInEditor(addHeaderButton)
             addHeaderButton.click()
             let key = endpointEditor.headerKeyField(at: index)
-            XCTAssertTrue(key.waitForExistence(timeout: 5), "Header row \(index) should appear")
+            XCTAssertTrue(key.waitToExist(timeout: 5), "Header row \(index) should appear")
             revealInEditor(key)
             key.click()
             key.typeText(name)
@@ -1018,7 +1018,7 @@ final class EndpointEditorUITests: MimicUITestCase {
                        "The middle row should hold the middle value before the removal")
 
         let remove = removeHeaderButton(at: 1)
-        XCTAssertTrue(remove.waitForExistence(timeout: 5),
+        XCTAssertTrue(remove.waitToExist(timeout: 5),
                       "Each header row should offer a remove button")
         revealInEditor(remove)
         remove.click()
@@ -1054,10 +1054,10 @@ final class EndpointEditorUITests: MimicUITestCase {
         hideRequestLogDrawer()
 
         let editor = bodyTextView()
-        XCTAssertTrue(editor.waitForExistence(timeout: 5),
+        XCTAssertTrue(editor.waitToExist(timeout: 5),
                       "The editor pane should render the response body editor")
 
-        XCTAssertTrue(prettyPrintButton.waitForExistence(timeout: 5),
+        XCTAssertTrue(prettyPrintButton.waitToExist(timeout: 5),
                       "The Response body section should offer 'Pretty-print JSON'")
         XCTAssertFalse(prettyPrintButton.isEnabled,
                        "Format should be disabled while the body is empty")
@@ -1100,7 +1100,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertTrue(workspace.assertVisible())
 
         let path = workspace.endpointPathText("/api/body")
-        XCTAssertTrue(path.waitForExistence(timeout: 5))
+        XCTAssertTrue(path.waitToExist(timeout: 5))
         path.click()
 
         let persisted = UITestApp.waitUntil(timeout: 8) { self.bodyText() == formatted }
@@ -1118,14 +1118,14 @@ final class EndpointEditorUITests: MimicUITestCase {
         setResponseBody(#"{"saved":"default"}"#, expecting: "default")
         waitForAsyncSave()
 
-        XCTAssertTrue(addScenarioButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(addScenarioButton.waitToExist(timeout: 5))
         addScenarioButton.click()
-        XCTAssertTrue(newScenarioSheet.nameField.waitForExistence(timeout: 5))
+        XCTAssertTrue(newScenarioSheet.nameField.waitToExist(timeout: 5))
         newScenarioSheet.nameField.click()
         newScenarioSheet.nameField.typeText("Other response")
         newScenarioSheet.createButton.click()
         let other = inspector.scenarioRow(named: "Other response")
-        XCTAssertTrue(other.waitForExistence(timeout: 5))
+        XCTAssertTrue(other.waitToExist(timeout: 5))
         // A row click opens the scenario in the editor; it does not make it live, and the body
         // edited below belongs to the scenario that is open, live or not.
         other.click()
@@ -1163,7 +1163,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         recent.click()
         XCTAssertTrue(workspace.assertVisible())
         let path = workspace.endpointPathText("/api/clear")
-        XCTAssertTrue(path.waitForExistence(timeout: 5))
+        XCTAssertTrue(path.waitToExist(timeout: 5))
         path.click()
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { self.bodyTextView().value as? String == "" },
                       "Reopening must read the cleared body from the store")
@@ -1190,7 +1190,7 @@ final class EndpointEditorUITests: MimicUITestCase {
                 && self.bodyText() == #"{"remote":true}"#
         }, "A control update must refresh the visible response without changing the selection")
         endpointEditor.showHeaders()
-        XCTAssertTrue(endpointEditor.headerKeyField(at: 0).waitForExistence(timeout: 5))
+        XCTAssertTrue(endpointEditor.headerKeyField(at: 0).waitToExist(timeout: 5))
         XCTAssertEqual(endpointEditor.headerKeyField(at: 0).value as? String, "X-Source")
         XCTAssertEqual(endpointEditor.headerValueField(at: 0).value as? String, "control")
         // Back to Body: the body editor exists only while its pane is selected.
@@ -1215,17 +1215,17 @@ final class EndpointEditorUITests: MimicUITestCase {
         try await verifyControlFixture()
         createProjectViaUI(name: "Original draft project")
         workspace.addEndpointButton.click()
-        XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 5))
+        XCTAssertTrue(newEndpointSheet.nameField.waitToExist(timeout: 5))
         newEndpointSheet.nameField.click()
         newEndpointSheet.nameField.typeText("Original unsaved endpoint")
 
         try await controlResponse(["projectCreate": ["name": "Replacement project", "port": 62177]])
-        XCTAssertTrue(newEndpointSheet.nameField.waitForNonExistence(timeout: 5),
+        XCTAssertTrue(newEndpointSheet.nameField.waitToDisappear(timeout: 5),
                       "A draft opened for the old project must not remain actionable in the replacement")
-        XCTAssertTrue(app.windows["Replacement project"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.windows["Replacement project"].waitToExist(timeout: 5))
 
         workspace.addEndpointButton.click()
-        XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 5))
+        XCTAssertTrue(newEndpointSheet.nameField.waitToExist(timeout: 5))
         XCTAssertEqual(newEndpointSheet.nameField.value as? String, "",
                        "The replacement project starts with its own empty endpoint draft")
         newEndpointSheet.cancelButton.click()
@@ -1245,18 +1245,16 @@ final class EndpointEditorUITests: MimicUITestCase {
         setResponseBody(deepJSON, expecting: "[0]")
 
         XCTAssertEqual(bodyText(), deepJSON, "The editor should hold the complete valid JSON fixture")
-        XCTAssertTrue(prettyPrintButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(prettyPrintButton.waitToExist(timeout: 5))
         XCTAssertFalse(prettyPrintButton.isEnabled,
                        "Format cannot re-indent this valid body within the 256 KiB output budget")
         // The formatter settles after 300 ms. An immediate disabled assertion alone would pass
-        // even if the old validity result enabled the button a moment later.
-        let incorrectlyEnabled = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "enabled == true"),
-            object: prettyPrintButton
+        // even if the old validity result enabled the button a moment later, so this watches the
+        // button for a whole second and fails if it is ever enabled.
+        XCTAssertFalse(
+            UITestApp.waitUntil(timeout: 1, pollInterval: 0.1) { self.prettyPrintButton.isEnabled },
+            "Format must stay disabled after the bounded formatter has settled"
         )
-        incorrectlyEnabled.isInverted = true
-        XCTAssertEqual(XCTWaiter.wait(for: [incorrectlyEnabled], timeout: 1), .completed,
-                       "Format must stay disabled after the bounded formatter has settled")
 
         setResponseBody("[0]", expecting: "[0]")
         XCTAssertEqual(bodyText(), "[0]")
@@ -1283,7 +1281,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         setResponseBody("definitely not json", expecting: "definitely not json")
 
         let warning = anyElement(identified: "ds.jsoneditor.editor.body.error")
-        XCTAssertTrue(warning.waitForExistence(timeout: 6),
+        XCTAssertTrue(warning.waitToExist(timeout: 6),
                       "A malformed body should raise the JSON warning after the validation settle")
         // Read from the row rather than from its first element — see `bodyWarningText()`. The row's
         // glyph is listed first and carries the whole of AppKit's "Warning", which is what the
@@ -1293,7 +1291,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertTrue(saysItIsKept,
                       "The warning should say the body is saved and served as written — it reads \(warningText)")
 
-        XCTAssertTrue(prettyPrintButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(prettyPrintButton.waitToExist(timeout: 5))
         XCTAssertFalse(prettyPrintButton.isEnabled,
                        "Format should be disabled while the body is not valid JSON")
 
@@ -1312,12 +1310,12 @@ final class EndpointEditorUITests: MimicUITestCase {
 
         setResponseBody("definitely not json", expecting: "definitely not json")
         let warning = anyElement(identified: "ds.jsoneditor.editor.body.error")
-        XCTAssertTrue(warning.waitForExistence(timeout: 6))
+        XCTAssertTrue(warning.waitToExist(timeout: 6))
 
         setResponseBody("42", expecting: "42")
         XCTAssertTrue(UITestApp.waitUntil(timeout: 6) { !warning.exists },
                       "A top-level JSON number must not show the invalid JSON warning")
-        XCTAssertTrue(prettyPrintButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(prettyPrintButton.waitToExist(timeout: 5))
         XCTAssertFalse(prettyPrintButton.isEnabled,
                        "A valid JSON scalar has no object or array layout to format")
         XCTAssertEqual(bodyText(), "42")
@@ -1338,14 +1336,14 @@ final class EndpointEditorUITests: MimicUITestCase {
         createEndpointViaUI(name: "Status EP", path: "/api/status")
 
         let field = endpointEditor.statusCodeField
-        XCTAssertTrue(field.waitForExistence(timeout: 5),
+        XCTAssertTrue(field.waitToExist(timeout: 5),
                       "The Response section should show the status code field")
 
         field.click()
         field.typeKey("a", modifierFlags: .command)
         field.typeText("600")
 
-        XCTAssertTrue(statusCodeValidationNote.waitForExistence(timeout: 6),
+        XCTAssertTrue(statusCodeValidationNote.waitToExist(timeout: 6),
                       "An out-of-range status code should raise the validation note once it settles")
         let statesTheRule = UITestApp.waitUntil(timeout: 5) {
             self.shownText(of: self.statusCodeValidationNote).contains("must be between 200 and 599")
@@ -1370,7 +1368,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         field.click()
         field.typeKey("a", modifierFlags: .command)
         field.typeText("404")
-        XCTAssertTrue(statusCodeValidationNote.waitForNonExistence(timeout: 6),
+        XCTAssertTrue(statusCodeValidationNote.waitToDisappear(timeout: 6),
                       "A serveable code should take the note back down")
     }
 
@@ -1392,7 +1390,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         hideRequestLogDrawer()
 
         let groupTag = inspector.groupTagField
-        XCTAssertTrue(groupTag.waitForExistence(timeout: 5),
+        XCTAssertTrue(groupTag.waitToExist(timeout: 5),
                       "The inspector's Endpoint section should show the group tag field")
         // Read back rather than gated on `isHittable` — see `typeIntoEditorField`. The tag has to be
         // in the field before Tab can commit it, and a click that landed elsewhere reads as "the tag
@@ -1444,7 +1442,7 @@ final class EndpointEditorUITests: MimicUITestCase {
 
         // With /api/health in the editor, /api/users can only be the sidebar's row.
         let usersRow = workspace.endpointPathText("/api/users")
-        XCTAssertTrue(usersRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(usersRow.waitToExist(timeout: 5))
         usersRow.click()
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) {
@@ -1454,17 +1452,17 @@ final class EndpointEditorUITests: MimicUITestCase {
         )
 
         let collapse = groupDisclosure("Collapse", name: "Ops")
-        XCTAssertTrue(collapse.waitForExistence(timeout: 5))
+        XCTAssertTrue(collapse.waitToExist(timeout: 5))
         collapse.click()
-        XCTAssertTrue(workspace.endpointPathText("/api/health").waitForNonExistence(timeout: 5))
+        XCTAssertTrue(workspace.endpointPathText("/api/health").waitToDisappear(timeout: 5))
 
         let expand = groupDisclosure("Expand", name: "Ops")
-        XCTAssertTrue(expand.waitForExistence(timeout: 5))
+        XCTAssertTrue(expand.waitToExist(timeout: 5))
         expand.click()
-        XCTAssertTrue(workspace.endpointPathText("/api/health").waitForExistence(timeout: 5))
+        XCTAssertTrue(workspace.endpointPathText("/api/health").waitToExist(timeout: 5))
 
         let healthPath = workspace.endpointPathText("/api/health")
-        XCTAssertTrue(healthPath.waitForExistence(timeout: 5),
+        XCTAssertTrue(healthPath.waitToExist(timeout: 5),
                       "The grouped endpoint should still be listed under its section while its "
                           + "ungrouped sibling is the one being edited")
     }
@@ -1484,7 +1482,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         hideRequestLogDrawer()
 
         let delay = endpointEditor.delayField
-        XCTAssertTrue(delay.waitForExistence(timeout: 5),
+        XCTAssertTrue(delay.waitToExist(timeout: 5),
                       "The editor's fields row should show the per-endpoint delay field")
         revealInEditor(delay)
         delay.click()
@@ -1505,11 +1503,11 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertTrue(workspace.assertVisible())
 
         let path = workspace.endpointPathText("/api/slow")
-        XCTAssertTrue(path.waitForExistence(timeout: 5))
+        XCTAssertTrue(path.waitToExist(timeout: 5))
         path.click()
 
         let reopenedDelay = endpointEditor.delayField
-        XCTAssertTrue(reopenedDelay.waitForExistence(timeout: 5))
+        XCTAssertTrue(reopenedDelay.waitToExist(timeout: 5))
         XCTAssertEqual(reopenedDelay.value as? String, "250",
                        "Blurring the delay field should have committed the value to the endpoint")
 
@@ -1520,7 +1518,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         reopenedDelay.typeText("abc")
         app.typeKey(.tab, modifierFlags: [])
 
-        XCTAssertTrue(delayValidationNote.waitForExistence(timeout: 5),
+        XCTAssertTrue(delayValidationNote.waitToExist(timeout: 5),
                       "A non-numeric delay should say why it was not accepted")
         let delayMessage = shownText(of: delayValidationNote)
         XCTAssertTrue(delayMessage.contains("Delay must be a whole number from 0 to 300000 ms"),
@@ -1544,7 +1542,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         createEndpointViaUI(name: "Any EP", path: "/api/any")
         hideRequestLogDrawer()
 
-        XCTAssertTrue(globalDelayValue.waitForExistence(timeout: 5),
+        XCTAssertTrue(globalDelayValue.waitToExist(timeout: 5),
                       "The inspector's Endpoint section should show the project-wide delay")
         let globalDelayText = shownText(of: globalDelayValue)
         XCTAssertTrue(globalDelayText.contains("Global delay"),
@@ -1570,11 +1568,11 @@ final class EndpointEditorUITests: MimicUITestCase {
         createProjectViaUI(name: "Scenario Add")
         createEndpointViaUI(name: "Scenario EP", path: "/api/scenarios")
 
-        XCTAssertTrue(addScenarioButton.waitForExistence(timeout: 5),
+        XCTAssertTrue(addScenarioButton.waitToExist(timeout: 5),
                       "The inspector header should offer 'Add scenario' while showing an endpoint")
         addScenarioButton.click()
 
-        XCTAssertTrue(newScenarioSheet.nameField.waitForExistence(timeout: 5),
+        XCTAssertTrue(newScenarioSheet.nameField.waitToExist(timeout: 5),
                       "The new-scenario sheet should appear")
         XCTAssertFalse(newScenarioSheet.createButton.isEnabled,
                        "'Add scenario' should be disabled while the name is blank")
@@ -1592,9 +1590,9 @@ final class EndpointEditorUITests: MimicUITestCase {
         )
         newScenarioSheet.createButton.click()
 
-        XCTAssertTrue(newScenarioSheet.nameField.waitForNonExistence(timeout: 3),
+        XCTAssertTrue(newScenarioSheet.nameField.waitToDisappear(timeout: 3),
                       "Confirming should dismiss the sheet")
-        XCTAssertTrue(inspector.scenarioRow(named: "Unauthorized").waitForExistence(timeout: 5),
+        XCTAssertTrue(inspector.scenarioRow(named: "Unauthorized").waitToExist(timeout: 5),
                       "The new scenario should appear in the inspector's list")
         XCTAssertTrue(inspector.scenarioRow(named: "Default").exists,
                       "Adding a scenario should not disturb the existing one")
@@ -1609,31 +1607,31 @@ final class EndpointEditorUITests: MimicUITestCase {
         createProjectViaUI(name: "Scenario Keys")
         createEndpointViaUI(name: "Scenario EP", path: "/api/scenarios")
 
-        XCTAssertTrue(addScenarioButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(addScenarioButton.waitToExist(timeout: 5))
         addScenarioButton.click()
-        XCTAssertTrue(newScenarioSheet.nameField.waitForExistence(timeout: 5),
+        XCTAssertTrue(newScenarioSheet.nameField.waitToExist(timeout: 5),
                       "The new-scenario sheet should appear")
 
         // Named before cancelling, so "Cancel adds nothing" is a claim about a scenario that was
         // actually described rather than about a string nobody typed.
         newScenarioSheet.nameField.click()
         newScenarioSheet.nameField.typeText("Discarded")
-        XCTAssertTrue(newScenarioSheet.cancelButton.waitForExistence(timeout: 3),
+        XCTAssertTrue(newScenarioSheet.cancelButton.waitToExist(timeout: 3),
                       "The new-scenario sheet should offer Cancel")
         newScenarioSheet.cancelButton.click()
 
-        XCTAssertTrue(newScenarioSheet.nameField.waitForNonExistence(timeout: 3),
+        XCTAssertTrue(newScenarioSheet.nameField.waitToDisappear(timeout: 3),
                       "Cancel should dismiss the sheet")
-        XCTAssertFalse(inspector.scenarioRow(named: "Discarded").waitForExistence(timeout: 2),
+        XCTAssertFalse(inspector.scenarioRow(named: "Discarded").waitToExist(timeout: 2),
                        "Cancel should add nothing, however far the name was typed")
 
         addScenarioButton.click()
-        XCTAssertTrue(newScenarioSheet.nameField.waitForExistence(timeout: 5))
+        XCTAssertTrue(newScenarioSheet.nameField.waitToExist(timeout: 5))
         newScenarioSheet.nameField.click()
         newScenarioSheet.nameField.typeText("Server error")
         app.typeKey(.return, modifierFlags: [])
 
-        XCTAssertTrue(inspector.scenarioRow(named: "Server error").waitForExistence(timeout: 5),
+        XCTAssertTrue(inspector.scenarioRow(named: "Server error").waitToExist(timeout: 5),
                       "Return should submit the sheet and add the scenario")
     }
 
@@ -1654,15 +1652,15 @@ final class EndpointEditorUITests: MimicUITestCase {
         createProjectViaUI(name: "Scenario Switch")
         createEndpointViaUI(name: "Scenario EP", path: "/api/scenarios")
 
-        XCTAssertTrue(addScenarioButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(addScenarioButton.waitToExist(timeout: 5))
         addScenarioButton.click()
-        XCTAssertTrue(newScenarioSheet.nameField.waitForExistence(timeout: 5))
+        XCTAssertTrue(newScenarioSheet.nameField.waitToExist(timeout: 5))
         newScenarioSheet.nameField.click()
         newScenarioSheet.nameField.typeText("Unauthorized")
         newScenarioSheet.createButton.click()
 
         let added = inspector.scenarioRow(named: "Unauthorized")
-        XCTAssertTrue(added.waitForExistence(timeout: 5))
+        XCTAssertTrue(added.waitToExist(timeout: 5))
 
         XCTAssertTrue(waitForScenarioValue("active", named: "Default"),
                       "The endpoint's first scenario stays active when a second is added")
@@ -1670,7 +1668,7 @@ final class EndpointEditorUITests: MimicUITestCase {
                       "A newly added scenario is not activated by being added")
 
         let radio = inspector.liveRadio(named: "Unauthorized")
-        XCTAssertTrue(radio.waitForExistence(timeout: 5), "Each scenario row should lead with a live radio")
+        XCTAssertTrue(radio.waitToExist(timeout: 5), "Each scenario row should lead with a live radio")
         XCTAssertEqual(radio.label, "Make Unauthorized live",
                        "A radio that is off should say what clicking it does")
         radio.click()
@@ -1700,16 +1698,16 @@ final class EndpointEditorUITests: MimicUITestCase {
                       "A new endpoint opens its live default — \(endpointEditor.liveStateText())")
         XCTAssertFalse(endpointEditor.makeLiveButton.exists, "The live scenario has nothing to make live")
 
-        XCTAssertTrue(addScenarioButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(addScenarioButton.waitToExist(timeout: 5))
         addScenarioButton.click()
-        XCTAssertTrue(newScenarioSheet.nameField.waitForExistence(timeout: 5))
+        XCTAssertTrue(newScenarioSheet.nameField.waitToExist(timeout: 5))
         newScenarioSheet.nameField.click()
         newScenarioSheet.nameField.typeText("Unauthorized")
         newScenarioSheet.createButton.click()
 
         let defaultRow = inspector.scenarioRow(named: "Default")
         let addedRow = inspector.scenarioRow(named: "Unauthorized")
-        XCTAssertTrue(addedRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(addedRow.waitToExist(timeout: 5))
 
         // Back to Default first, so the click below is a real move rather than a no-op on the
         // scenario the add already opened.
@@ -1736,7 +1734,7 @@ final class EndpointEditorUITests: MimicUITestCase {
                       "The live scenario should stay live while another is being edited")
 
         let makeLive = endpointEditor.makeLiveButton
-        XCTAssertTrue(makeLive.waitForExistence(timeout: 5), "A scenario that is not live should offer Make live")
+        XCTAssertTrue(makeLive.waitToExist(timeout: 5), "A scenario that is not live should offer Make live")
         makeLive.click()
         XCTAssertTrue(waitForScenarioValue("active", named: "Unauthorized"),
                       "Make live should serve the scenario being edited")
@@ -1744,7 +1742,7 @@ final class EndpointEditorUITests: MimicUITestCase {
                       "…and take the marker off the previous one")
         XCTAssertTrue(endpointEditor.waitForEditedScenario("Unauthorized", live: true),
                       "The editor should now say Live — \(endpointEditor.liveStateText())")
-        XCTAssertTrue(makeLive.waitForNonExistence(timeout: 5), "A live scenario has nothing to make live")
+        XCTAssertTrue(makeLive.waitToDisappear(timeout: 5), "A live scenario has nothing to make live")
     }
 
     // MARK: - 17. A scenario row announces its status code
@@ -1762,13 +1760,13 @@ final class EndpointEditorUITests: MimicUITestCase {
         createEndpointViaUI(name: "Scenario EP", path: "/api/scenarios")
 
         let row = inspector.scenarioRow(named: "Default")
-        XCTAssertTrue(row.waitForExistence(timeout: 5),
+        XCTAssertTrue(row.waitToExist(timeout: 5),
                       "The endpoint's Default scenario should be listed")
         XCTAssertTrue(row.label.contains("status 200"),
                       "The row should speak its status code — it reads \(row.label)")
 
         let field = endpointEditor.statusCodeField
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertTrue(field.waitToExist(timeout: 5))
         field.click()
         field.typeKey("a", modifierFlags: .command)
         field.typeText("503")
@@ -1798,40 +1796,40 @@ final class EndpointEditorUITests: MimicUITestCase {
         workspace.compactWindow()
 
         let defaultRow = inspector.scenarioRow(named: "Default")
-        XCTAssertTrue(defaultRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(defaultRow.waitToExist(timeout: 5))
         rightClickScenarioRow(defaultRow, named: "Default")
 
         let deleteItem = app.menuItems["Delete scenario"]
-        XCTAssertTrue(deleteItem.waitForExistence(timeout: 5),
+        XCTAssertTrue(deleteItem.waitToExist(timeout: 5),
                       "The scenario row's context menu should offer 'Delete scenario'")
         XCTAssertFalse(deleteItem.isEnabled,
                        "Deleting the endpoint's only scenario would leave it serving nothing, so it is disabled")
         app.typeKey(.escape, modifierFlags: [])
-        XCTAssertTrue(deleteItem.waitForNonExistence(timeout: 5),
+        XCTAssertTrue(deleteItem.waitToDisappear(timeout: 5),
                       "The context menu should close before using the inspector toolbar")
 
-        XCTAssertTrue(addScenarioButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(addScenarioButton.waitToExist(timeout: 5))
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) { self.addScenarioButton.isHittable },
             "Add scenario should be hittable after dismissing the context menu"
         )
         addScenarioButton.click()
-        XCTAssertTrue(newScenarioSheet.nameField.waitForExistence(timeout: 5))
+        XCTAssertTrue(newScenarioSheet.nameField.waitToExist(timeout: 5))
         newScenarioSheet.nameField.click()
         newScenarioSheet.nameField.typeText("Unauthorized")
         newScenarioSheet.createButton.click()
 
         let addedRow = inspector.scenarioRow(named: "Unauthorized")
-        XCTAssertTrue(addedRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(addedRow.waitToExist(timeout: 5))
 
         rightClickScenarioRow(addedRow, named: "Unauthorized")
         let secondDelete = app.menuItems["Delete scenario"]
-        XCTAssertTrue(secondDelete.waitForExistence(timeout: 5))
+        XCTAssertTrue(secondDelete.waitToExist(timeout: 5))
         XCTAssertTrue(secondDelete.isEnabled,
                       "With two scenarios, deleting one is allowed")
         secondDelete.click()
 
-        XCTAssertTrue(addedRow.waitForNonExistence(timeout: 5),
+        XCTAssertTrue(addedRow.waitToDisappear(timeout: 5),
                       "The deleted scenario should leave the inspector's list")
         XCTAssertTrue(inspector.scenarioRow(named: "Default").exists,
                       "The scenario that was not deleted should still be there")
@@ -1851,7 +1849,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         createProjectViaUI(name: "Filter Clear")
         createEndpointViaUI(name: "Users", path: "/api/users")
 
-        XCTAssertTrue(sidebarFilterField.waitForExistence(timeout: 5),
+        XCTAssertTrue(sidebarFilterField.waitToExist(timeout: 5),
                       "A project with endpoints should show the sidebar filter field")
         sidebarFilterField.click()
         sidebarFilterField.typeText("zzz")
@@ -1865,7 +1863,7 @@ final class EndpointEditorUITests: MimicUITestCase {
                       "The message should quote the query that emptied the list")
 
         let clearButton = app.buttons["Clear filter"].firstMatch
-        XCTAssertTrue(clearButton.waitForExistence(timeout: 5),
+        XCTAssertTrue(clearButton.waitToExist(timeout: 5),
                       "A non-empty filter should offer a clear button")
         clearButton.click()
 
@@ -1892,24 +1890,30 @@ final class EndpointEditorUITests: MimicUITestCase {
         createProjectViaUI(name: "Filter Scope")
         createEndpointViaUI(name: "Users", path: "/api/users")
 
-        XCTAssertTrue(sidebarFilterScopeMenu.waitForExistence(timeout: 5),
+        XCTAssertTrue(sidebarFilterScopeMenu.waitToExist(timeout: 5),
                       "The sidebar filter should offer a method scope")
-        sidebarFilterScopeMenu.click()
-
-        let deleteScope = app.menuItems["DELETE"]
-        XCTAssertTrue(deleteScope.waitForExistence(timeout: 5),
-                      "The scope menu should list the HTTP methods")
-        deleteScope.click()
+        // Through the shared value-picker helper, which proves the choice by the scope pill's value
+        // rather than by having clicked something; a menu item clicked directly is looked up twice
+        // and can land a row away when the open menu moves in between.
+        let scope = sidebarFilterScopeMenu
+        XCTAssertTrue(
+            UITestApp.chooseMenuOption("DELETE", in: scope, of: app) {
+                scope.exists && scope.value as? String == "DELETE"
+            },
+            "The scope menu should list the HTTP methods and switch to DELETE — it reads \(UITestApp.spoken(scope))"
+        )
 
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 6) { self.sidebarReportsNoMatches(saying: "No DELETE endpoints") },
             "Scoping to a method the project has none of should name that scope, not go blank"
         )
 
-        sidebarFilterScopeMenu.click()
-        let getScope = app.menuItems["GET"]
-        XCTAssertTrue(getScope.waitForExistence(timeout: 5))
-        getScope.click()
+        XCTAssertTrue(
+            UITestApp.chooseMenuOption("GET", in: scope, of: app) {
+                scope.exists && scope.value as? String == "GET"
+            },
+            "The scope menu should switch to GET — it reads \(UITestApp.spoken(scope))"
+        )
 
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 6) { self.sidebarNoMatchesRow.exists == false },
@@ -1936,7 +1940,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         let rows = sidebarEndpointRows()
         rows[0].rightClick()
 
-        XCTAssertTrue(app.menuItems["Duplicate"].waitForExistence(timeout: 5),
+        XCTAssertTrue(app.menuItems["Duplicate"].waitToExist(timeout: 5),
                       "The row's context menu should offer Duplicate")
         XCTAssertTrue(app.menuItems["Delete endpoint\u{2026}"].exists,
                       "The row's context menu should offer Delete endpoint…")
@@ -1967,12 +1971,12 @@ final class EndpointEditorUITests: MimicUITestCase {
         rows[0].rightClick()
 
         let deleteItem = app.menuItems["Delete endpoint\u{2026}"]
-        XCTAssertTrue(deleteItem.waitForExistence(timeout: 5),
+        XCTAssertTrue(deleteItem.waitToExist(timeout: 5),
                       "The row's context menu should offer Delete endpoint…")
         deleteItem.click()
 
         let sheet = app.sheets.firstMatch
-        XCTAssertTrue(sheet.waitForExistence(timeout: 5),
+        XCTAssertTrue(sheet.waitToExist(timeout: 5),
                       "Deleting from the sidebar should ask for confirmation")
         // The title may arrive as the sheet's own label or as a `StaticText` inside it, so both are
         // polled — which of the two AppKit uses for an alert title is not something to guess at.
@@ -1985,7 +1989,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         XCTAssertTrue(namesTheEndpoint,
                       "The sidebar's confirmation should name the endpoint it is about to remove")
 
-        XCTAssertTrue(sheet.buttons["Cancel"].waitForExistence(timeout: 3),
+        XCTAssertTrue(sheet.buttons["Cancel"].waitToExist(timeout: 3),
                       "The confirmation should offer a way out")
         sheet.buttons["Cancel"].click()
         XCTAssertTrue(waitForSidebarRowCount(1),
@@ -1994,14 +1998,14 @@ final class EndpointEditorUITests: MimicUITestCase {
         rows = sidebarEndpointRows()
         rows[0].rightClick()
         let secondDelete = app.menuItems["Delete endpoint\u{2026}"]
-        XCTAssertTrue(secondDelete.waitForExistence(timeout: 5))
+        XCTAssertTrue(secondDelete.waitToExist(timeout: 5))
         secondDelete.click()
 
         let confirmSheet = app.sheets.firstMatch
-        XCTAssertTrue(confirmSheet.buttons["Delete endpoint"].waitForExistence(timeout: 5))
+        XCTAssertTrue(confirmSheet.buttons["Delete endpoint"].waitToExist(timeout: 5))
         confirmSheet.buttons["Delete endpoint"].click()
 
-        XCTAssertTrue(workspace.sidebarEmptyHeading.waitForExistence(timeout: 5),
+        XCTAssertTrue(workspace.sidebarEmptyHeading.waitToExist(timeout: 5),
                       "Deleting the last endpoint should return the sidebar to its empty state")
     }
 
@@ -2021,7 +2025,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         createProjectViaUI(name: "Editor Duplicate")
         createEndpointViaUI(name: "Orders", path: "/api/orders")
 
-        XCTAssertTrue(endpointEditor.moreMenu.waitForExistence(timeout: 5),
+        XCTAssertTrue(endpointEditor.moreMenu.waitToExist(timeout: 5),
                       "The request bar should offer the endpoint's actions on its method")
         XCTAssertTrue([.menuButton, .popUpButton].contains(endpointEditor.moreMenu.elementType),
                       "The method should be a menu — it is \(endpointEditor.moreMenu.elementType.rawValue)")
@@ -2033,7 +2037,7 @@ final class EndpointEditorUITests: MimicUITestCase {
         endpointEditor.moreMenu.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
 
         let duplicate = app.menuItems["Duplicate endpoint"]
-        XCTAssertTrue(duplicate.waitForExistence(timeout: 5),
+        XCTAssertTrue(duplicate.waitToExist(timeout: 5),
                       "The endpoint menu should offer Duplicate endpoint. Menu: \(endpointEditor.moreMenu.debugDescription)\nEditor: \(app.descendants(matching: .any).matching(identifier: "endpointEditor").firstMatch.debugDescription)")
         XCTAssertTrue(app.menuItems["Edit request\u{2026}"].exists,
                       "The same menu should offer to edit the request")
@@ -2067,7 +2071,7 @@ final class EndpointEditorUITests: MimicUITestCase {
 
         let menu = endpointEditor.moreMenu
         XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180)
-        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        XCTAssertTrue(menu.waitToExist(timeout: 5))
         XCTAssertTrue(menu.isHittable)
         XCTAssertTrue([.menuButton, .popUpButton].contains(menu.elementType),
                       "The method should be a menu — it is \(menu.elementType.rawValue)")
@@ -2080,7 +2084,7 @@ final class EndpointEditorUITests: MimicUITestCase {
 
         // The element's own hit point, resolved at click time, the way the wide editor's tests open it.
         menu.click()
-        XCTAssertTrue(app.menuItems["Duplicate endpoint"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.menuItems["Duplicate endpoint"].waitToExist(timeout: 5))
         XCTAssertTrue(app.menuItems["Delete endpoint\u{2026}"].exists)
         let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         evidence.name = "compact-endpoint-more-menu-dark"
@@ -2101,19 +2105,19 @@ final class EndpointEditorUITests: MimicUITestCase {
         createProjectViaUI(name: "Editor Delete Cancel")
         createEndpointViaUI(name: "Keep Me", path: "/api/keep")
 
-        XCTAssertTrue(endpointEditor.moreMenu.waitForExistence(timeout: 5))
+        XCTAssertTrue(endpointEditor.moreMenu.waitToExist(timeout: 5))
         endpointEditor.moreMenu.click()
 
         let deleteItem = app.menuItems["Delete endpoint\u{2026}"]
-        XCTAssertTrue(deleteItem.waitForExistence(timeout: 5))
+        XCTAssertTrue(deleteItem.waitToExist(timeout: 5))
         deleteItem.click()
 
         let sheet = app.sheets.firstMatch
-        XCTAssertTrue(sheet.buttons["Cancel"].waitForExistence(timeout: 5),
+        XCTAssertTrue(sheet.buttons["Cancel"].waitToExist(timeout: 5),
                       "The editor's delete confirmation should offer Cancel")
         sheet.buttons["Cancel"].click()
 
-        XCTAssertTrue(sheet.waitForNonExistence(timeout: 3),
+        XCTAssertTrue(sheet.waitToDisappear(timeout: 3),
                       "Cancel should dismiss the confirmation")
         XCTAssertTrue(waitForSidebarRowCount(1),
                       "Cancelling should leave the endpoint in the sidebar")
