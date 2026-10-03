@@ -13,7 +13,7 @@ import WorkspaceShell
 @MainActor
 extension GalleryCatalog {
     static let componentsFromSections: [GalleryEntry] = [
-        GalleryEntry("ds.toolbar", "Toolbar controls", group: .components, size: CGSize(width: 432, height: 239)) {
+        GalleryEntry("ds.toolbar", "Toolbar controls", group: .components, size: CGSize(width: 432, height: 238)) {
             DSCatalogCard("Toolbar",
                           detail: "Glass over the title bar. Run and Stop share one round button; the actions share a capsule.") {
                 HStack(spacing: 10) {
@@ -32,7 +32,7 @@ extension GalleryCatalog {
                 }
             }
         },
-        GalleryEntry("ds.serverStatus", "Server status", group: .components, size: CGSize(width: 432, height: 239)) {
+        GalleryEntry("ds.serverStatus", "Server status", group: .components, size: CGSize(width: 432, height: 238)) {
             DSCatalogCard("Server status", detail: "The address over the server\u{2019}s state. Opens the status popover.") {
                 VStack(alignment: .leading, spacing: DSSpacing.xxs) {
                     GalleryComponentCards.well(.stopped, requests: 0, unmatched: 0)
@@ -44,7 +44,7 @@ extension GalleryCatalog {
                 }
             }
         },
-        GalleryEntry("ds.sidebarRow", "Sidebar row", group: .components, size: CGSize(width: 432, height: 368)) {
+        GalleryEntry("ds.sidebarRow", "Sidebar row", group: .components, size: CGSize(width: 432, height: 367)) {
             DSCatalogCard("Sidebar row", detail: "28 pt, rounded inset selection, grey when the sidebar is not focused.") {
                 DSNavigatorGroup(name: "Catalog", count: 4, itemName: "endpoints", isCollapsed: false,
                                  identifier: "gallery.sidebarRow.group", disclosure: .onHover) {}
@@ -63,7 +63,7 @@ extension GalleryCatalog {
                     .padding(.top, -6)
             }
         },
-        GalleryEntry("ds.scenarioRow", "Scenario row", group: .components, size: CGSize(width: 432, height: 235)) {
+        GalleryEntry("ds.scenarioRow", "Scenario row", group: .components, size: CGSize(width: 432, height: 234)) {
             DSCatalogCard("Scenario row",
                           detail: "The radio marks what the server serves. The highlight marks what you\u{2019}re editing.") {
                 VStack(spacing: DSSpacing.xxs) {
@@ -79,7 +79,7 @@ extension GalleryCatalog {
         },
         // The real rows at the card's width, with a run in flight: served, current, not reached.
         // Facts give way to the run readout as the row narrows, so the card is redrawn to match.
-        GalleryEntry("ds.journeyStep", "Journey step row", group: .components, size: CGSize(width: 432, height: 235)) {
+        GalleryEntry("ds.journeyStep", "Journey step row", group: .components, size: CGSize(width: 432, height: 234)) {
             DSCatalogCard("Journey step", detail: "Numbered nodes show progress. The current step is ringed.") {
                 VStack(spacing: DSSpacing.xxs) {
                     let steps = DesignFixtures.paymentRetry.steps

@@ -421,7 +421,7 @@
         48,
         48,
         432,
-        220
+        219
       ],
       "title": "Method label"
     },
@@ -432,7 +432,7 @@
         504,
         48,
         432,
-        220
+        219
       ],
       "title": "Status label"
     },
@@ -441,9 +441,9 @@
       "board": "Components",
       "rect": [
         48,
-        292,
+        291,
         432,
-        239
+        238
       ],
       "title": "Buttons"
     },
@@ -452,9 +452,9 @@
       "board": "Components",
       "rect": [
         504,
-        292,
+        291,
         432,
-        239
+        238
       ],
       "title": "Toolbar controls"
     },
@@ -463,9 +463,9 @@
       "board": "Components",
       "rect": [
         960,
-        292,
+        291,
         432,
-        239
+        238
       ],
       "title": "Server status"
     },
@@ -474,9 +474,9 @@
       "board": "Components",
       "rect": [
         48,
-        555,
+        553,
         432,
-        368
+        367
       ],
       "title": "Fields"
     },
@@ -485,9 +485,9 @@
       "board": "Components",
       "rect": [
         504,
-        555,
+        553,
         432,
-        368
+        367
       ],
       "title": "Segmented control and toggles"
     },
@@ -496,9 +496,9 @@
       "board": "Components",
       "rect": [
         960,
-        555,
+        553,
         432,
-        368
+        367
       ],
       "title": "Sidebar row"
     },
@@ -507,9 +507,9 @@
       "board": "Components",
       "rect": [
         48,
-        947,
+        944,
         432,
-        235
+        234
       ],
       "title": "Scenario row"
     },
@@ -518,9 +518,9 @@
       "board": "Components",
       "rect": [
         504,
-        947,
+        944,
         432,
-        235
+        234
       ],
       "title": "Journey step row"
     },
@@ -529,9 +529,9 @@
       "board": "Components",
       "rect": [
         960,
-        947,
+        944,
         432,
-        235
+        234
       ],
       "title": "Banners"
     },
@@ -540,9 +540,9 @@
       "board": "Components",
       "rect": [
         48,
-        1206,
+        1202,
         888,
-        208
+        206.5
       ],
       "title": "Table"
     },
@@ -551,9 +551,9 @@
       "board": "Components",
       "rect": [
         960,
-        1206,
+        1202,
         432,
-        208
+        206.5
       ],
       "title": "Code editor"
     },
@@ -562,9 +562,9 @@
       "board": "Components",
       "rect": [
         48,
-        1438,
+        1432.5,
         888,
-        269
+        266
       ],
       "title": "Jump bar and empty state"
     },
@@ -573,9 +573,9 @@
       "board": "Components",
       "rect": [
         960,
-        1438,
+        1432.5,
         432,
-        269
+        266
       ],
       "title": "Pills"
     },
