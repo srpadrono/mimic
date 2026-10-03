@@ -60,6 +60,13 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- An editor taller than its pane no longer slides its header under the jump bar when the request
+  log is dragged tall; the editor's bottom is clipped instead.
+- The first-endpoint chooser drops to two cards, or one, when its pane narrows, instead of keeping
+  three and running the last one out of the window.
+- In a window too narrow for the inspector beside a hidden navigator, the inspector steps aside
+  until the window widens, so the toolbar keeps the project name instead of hiding it behind
+  AppKit's overflow chevron.
 - Preserve Unicode text, selection, and Undo/Redo when formatting response bodies. Clearing a body
   persists, switching scenarios resets document undo, and remote updates refresh clean fields while
   preserving local drafts.

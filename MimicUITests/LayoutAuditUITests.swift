@@ -205,6 +205,7 @@ final class LayoutAuditUITests: MimicUITestCase {
             resize(to: size)
             for sidebar in [true, false] {
                 setSidebar(sidebar)
+                settle()
                 capture("request detail", size: size, panels: panelKey())
             }
         }
@@ -398,13 +399,16 @@ final class LayoutAuditUITests: MimicUITestCase {
     /// as far as the split view allows: its own floor below, the centre pane's floor above.
     @MainActor
     private func dragLog(toHeight height: CGFloat) {
-        guard let log = shownFrame("drawer"), let centre = shownFrame("centerPane"),
-              abs(log.height - height) > 4 else { return }
+        guard let current = logPaneHeight(), abs(current - height) > 4,
+              let centre = shownFrame("centerPane") else { return }
         let window = app.windows.firstMatch
         let frame = window.frame
-        let dividerY = (centre.maxY + log.minY) / 2
-        let targetY = max(frame.minY + 60, log.maxY - height - (log.minY - dividerY))
-        let x = log.midX - frame.minX
+        // The divider is the band between the centre pane and the log pane, not the log's header:
+        // `drawer` is the log's content, which starts below that header.
+        let dividerY = centre.maxY + Self.dividerBand / 2
+        let bottom = centre.maxY + Self.dividerBand + current
+        let targetY = max(frame.minY + 60, bottom - height - Self.dividerBand / 2)
+        let x = centre.midX - frame.minX
         let origin = window.coordinate(withNormalizedOffset: .zero)
         let start = origin.withOffset(CGVector(dx: x, dy: dividerY - frame.minY))
         let end = origin.withOffset(CGVector(dx: x, dy: targetY - frame.minY))
@@ -413,10 +417,34 @@ final class LayoutAuditUITests: MimicUITestCase {
         settle()
     }
 
+    /// `DSSplitPane` names its split view after the pair; the centre pane and the log pane share it.
+    private static let logSplitIdentifier = "ds.splitpane.requestLog"
+    /// `DSSplitPane`'s divider band, which belongs to neither pane.
+    private static let dividerBand: CGFloat = 10
+
+    /// The log pane's height, header included: from below the divider to the split view's bottom.
+    /// The `drawer` element is only the log's content, so its own height understates the pane.
+    static func logPaneHeight(centre: CGRect?, split: CGRect?, drawer: CGRect?) -> CGFloat? {
+        guard let drawer else { return nil }
+        guard let centre else { return drawer.height }
+        let bottom = split.map { max($0.maxY, drawer.maxY) } ?? drawer.maxY
+        return bottom - centre.maxY - dividerBand
+    }
+
+    @MainActor
+    private func logPaneHeight() -> CGFloat? {
+        Self.logPaneHeight(
+            centre: shownFrame("centerPane"), split: shownFrame(Self.logSplitIdentifier), drawer: shownFrame("drawer")
+        )
+    }
+
     /// Waits for the panes to stop moving: panel animations run after the command that starts them.
     @MainActor
     private func settle() {
-        for identifier in ["centerPane", "drawer", "inspector", "sidebar"] where pane(identifier).exists {
+        // The toolbar too: AppKit lays its items out again after the panes move, and a frame taken
+        // in between shows items on top of each other that a moment later are not.
+        for identifier in ["centerPane", "drawer", "inspector", "sidebar", "toolbar.projectIdentity", "serverStatusWell.url"]
+        where pane(identifier).exists {
             UITestApp.waitForStableFrame(pane(identifier), timeout: 1)
         }
     }
@@ -425,8 +453,8 @@ final class LayoutAuditUITests: MimicUITestCase {
     @MainActor
     private func panelKey(log: LogState? = nil) -> String {
         let logLabel: String
-        if let log, log == .minimum || log == .maximum, let frame = shownFrame("drawer") {
-            logLabel = "log \(log.rawValue) \(LayoutAudit.format(frame.height))pt"
+        if let log, log == .minimum || log == .maximum, let height = logPaneHeight() {
+            logLabel = "log \(log.rawValue) \(LayoutAudit.format(height))pt"
         } else {
             logLabel = shownFrame("drawer") == nil ? "no log" : "log"
         }
@@ -515,7 +543,6 @@ final class LayoutAuditUITests: MimicUITestCase {
             ("sidebar", "navigator", \.width, 220),
             ("inspector", "inspector", \.width, 260),
             ("centerPane", "centre pane", \.height, 270),
-            ("drawer", "request log", \.height, 160),
         ]
         for (identifier, name, dimension, floor) in floors {
             guard let frame = shown(identifier), frame[keyPath: dimension] < floor - 1 else { continue }
@@ -523,6 +550,15 @@ final class LayoutAuditUITests: MimicUITestCase {
                 rule: "panel-floor", severity: .error,
                 message: "The \(name) is \(LayoutAudit.format(frame[keyPath: dimension]))pt, under its \(LayoutAudit.format(floor))pt floor",
                 rect: frame
+            ))
+        }
+        if let drawer = shown("drawer"),
+           let log = Self.logPaneHeight(centre: shown("centerPane"), split: shown(Self.logSplitIdentifier), drawer: drawer),
+           log < 160 - 1 {
+            findings.append(LayoutFinding(
+                rule: "panel-floor", severity: .error,
+                message: "The request log is \(LayoutAudit.format(log))pt, under its 160pt floor",
+                rect: drawer
             ))
         }
         if let identity = elements.first(where: { $0.node.identifier == "toolbar.projectIdentity" })?.frame {

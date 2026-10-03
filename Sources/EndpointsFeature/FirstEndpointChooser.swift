@@ -32,7 +32,10 @@ public struct FirstEndpointChooser: View {
             content
             ScrollView { content }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // `minWidth: 0` so the measured width is the pane's, not the row's. Without it the frame is
+        // never narrower than three cards once three are showing, so a pane that narrows keeps
+        // measuring wide enough for three and the last card runs out of the window.
+        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { chooserWidth = $0 }
     }
 

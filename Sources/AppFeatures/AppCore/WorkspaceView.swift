@@ -75,6 +75,8 @@ struct WorkspaceView: View {
     /// Start with the narrowest fit so AppKit never overflows the identity before the first
     /// geometry measurement. Then update only when the layout tier changes during a resize.
     @State private var centerToolbarLayout: WorkspaceToolbarLayout = .minimal
+    /// False while the window is too narrow for the inspector beside a hidden navigator.
+    @State private var inspectorHasRoom = true
 
     /// Where the panels were left last time. Injected rather than read from `.standard` so a UI test
     /// run keeps its own arrangement — the same reason `RecentProjectsStore` is injected.
@@ -133,6 +135,7 @@ struct WorkspaceView: View {
             // the list, the close button, picking an endpoint — brings the editor back.
             showsTakeover: !selectedLogIDs.isEmpty,
             onToolbarLayoutChange: { centerToolbarLayout = $0 },
+            onInspectorRoomChange: { inspectorHasRoom = $0 },
             navigator: { navigator },
             jumpBar: {
                 BreadcrumbJumpBar(
@@ -407,7 +410,8 @@ struct WorkspaceView: View {
             unmatchedCount: RequestLogQuery.unmatchedCount(logs: appState.requestLogs),
             isRequestLogShown: isLogShown,
             isInspectorPresented: isInspectorPresented,
-            canPresentInspector: canPresentInspector
+            canPresentInspector: canPresentInspector,
+            inspectorHasRoom: inspectorHasRoom
         )
     }
 
@@ -488,14 +492,15 @@ struct WorkspaceView: View {
         return failure.details?["port"].flatMap { Int($0) }
     }
 
-    /// Whether there is anything for the inspector to show. A project with no endpoints and no
-    /// journeys has none.
+    /// Whether the inspector can open: there is something for it to show (a project with no
+    /// endpoints and no journeys has none), and the window has room for it beside the centre
+    /// column's toolbar.
     private var canPresentInspector: Bool {
-        !currentEndpoints.isEmpty || !appState.journeys.isEmpty
+        inspectorHasRoom && (!currentEndpoints.isEmpty || !appState.journeys.isEmpty)
     }
 
-    /// The column on screen: the person's choice, which an empty project or a request open in the
-    /// centre column overrides without forgetting it.
+    /// The column on screen: the person's choice, which an empty project, a window too narrow for
+    /// it, or a request open in the centre column overrides without forgetting it.
     private var isInspectorPresented: Bool {
         showInspector && canPresentInspector && selectedLogIDs.isEmpty
     }
@@ -898,7 +903,7 @@ struct WorkspaceView: View {
                 ),
                 inspector: AnyView(
                     WorkspaceInspectorToggle(isPresented: isInspectorPresented, canPresent: canPresentInspector,
-                                             action: toggleInspector).labelStyle(.iconOnly)
+                                             hasRoom: inspectorHasRoom, action: toggleInspector).labelStyle(.iconOnly)
                 )
             ),
             endpointTraffic: endpoint.map {

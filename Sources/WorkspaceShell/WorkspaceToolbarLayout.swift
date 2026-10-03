@@ -30,7 +30,7 @@ public nonisolated enum WorkspaceToolbarLayout: Equatable, Sendable {
 
     public init(centerWidth: CGFloat) {
         guard centerWidth.isFinite else { self = .minimal; return }
-        if centerWidth < 360 { self = .minimal }
+        if centerWidth < Self.minimalCenterWidth { self = .minimal }
         else if centerWidth < 460 { self = .narrow }
         else if centerWidth < 620 { self = .compactSummary }
         else if centerWidth < 780 { self = .overflow }
@@ -52,6 +52,27 @@ public nonisolated enum WorkspaceToolbarLayout: Equatable, Sendable {
 
     /// Run/Stop leads the "More actions" menu instead of the toolbar.
     public var foldsRun: Bool { self == .minimal }
+
+    /// The narrowest centre column the minimal tier fits over.
+    public static let minimalCenterWidth: CGFloat = 360
+
+    /// What the window's own controls, the traffic lights and the sidebar button, take from the
+    /// front of the centre column's toolbar while the navigator is hidden and they sit over it.
+    public static let leadingWindowChrome: CGFloat = 144
+
+    /// Whether the inspector can be open without pushing the centre column's toolbar past its
+    /// minimal tier and into AppKit's own overflow chevron, which takes the project name with it.
+    ///
+    /// Only a hidden navigator can do that: then the window's controls sit over the centre column,
+    /// and an inspector beside it leaves too little for even the minimal tier. The side panel gives
+    /// way rather than the toolbar. It is judged on the window's width, not the centre column's, so
+    /// closing the inspector cannot make room that would open it again.
+    public static func leavesRoomForInspector(
+        windowWidth: CGFloat, inspectorWidth: CGFloat, isNavigatorHidden: Bool
+    ) -> Bool {
+        guard isNavigatorHidden, windowWidth.isFinite else { return true }
+        return windowWidth - inspectorWidth >= minimalCenterWidth + leadingWindowChrome
+    }
 
     /// The project identity's widest extent at each stage, so the centre column's items fit its section.
     public var projectIdentityMaximumWidth: CGFloat {

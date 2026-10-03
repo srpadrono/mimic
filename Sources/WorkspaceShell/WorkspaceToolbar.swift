@@ -15,8 +15,10 @@ public nonisolated struct WorkspaceToolbarState: Equatable, Sendable {
     public var unmatchedCount: Int
     public var isRequestLogShown: Bool
     public var isInspectorPresented: Bool
-    /// Whether there is anything for the inspector to show.
+    /// Whether the inspector can open: there is something for it to show and room for it.
     public var canPresentInspector: Bool
+    /// Whether the window has room for the inspector; when it has not, that is why it cannot open.
+    public var inspectorHasRoom: Bool
 
     public init(
         layout: WorkspaceToolbarLayout,
@@ -26,7 +28,8 @@ public nonisolated struct WorkspaceToolbarState: Equatable, Sendable {
         unmatchedCount: Int = 0,
         isRequestLogShown: Bool = true,
         isInspectorPresented: Bool = true,
-        canPresentInspector: Bool = true
+        canPresentInspector: Bool = true,
+        inspectorHasRoom: Bool = true
     ) {
         self.layout = layout
         self.projectName = projectName
@@ -36,6 +39,7 @@ public nonisolated struct WorkspaceToolbarState: Equatable, Sendable {
         self.isRequestLogShown = isRequestLogShown
         self.isInspectorPresented = isInspectorPresented
         self.canPresentInspector = canPresentInspector
+        self.inspectorHasRoom = inspectorHasRoom
     }
 
     /// Import and server settings need a project to act on.
@@ -160,6 +164,7 @@ public struct WorkspaceToolbar<Run: View, RunMenuItem: View, Status: View>: Tool
                     .labelStyle(.iconOnly)
                 WorkspaceInspectorToggle(isPresented: state.isInspectorPresented,
                                          canPresent: state.canPresentInspector,
+                                         hasRoom: state.inspectorHasRoom,
                                          action: actions.toggleInspector)
                     .labelStyle(.iconOnly)
             }
@@ -325,15 +330,18 @@ public struct WorkspaceRequestLogToggle: View {
     }
 }
 
-/// Shows or hides the inspector column. Disabled while there is nothing to inspect.
+/// Shows or hides the inspector column. Disabled while there is nothing to inspect, or while the
+/// window is too narrow for it.
 public struct WorkspaceInspectorToggle: View {
     let isPresented: Bool
     let canPresent: Bool
+    let hasRoom: Bool
     let action: () -> Void
 
-    public init(isPresented: Bool, canPresent: Bool, action: @escaping () -> Void) {
+    public init(isPresented: Bool, canPresent: Bool, hasRoom: Bool = true, action: @escaping () -> Void) {
         self.isPresented = isPresented
         self.canPresent = canPresent
+        self.hasRoom = hasRoom
         self.action = action
     }
 
@@ -344,7 +352,7 @@ public struct WorkspaceInspectorToggle: View {
         .disabled(!canPresent)
         .help(canPresent
             ? (isPresented ? "Hide inspector (⌥⌘I)" : "Show inspector (⌥⌘I)")
-            : "Add an endpoint or a journey to inspect it")
+            : hasRoom ? "Add an endpoint or a journey to inspect it" : "Widen the window or show the navigator to open the inspector")
         .accessibilityIdentifier("toggleInspectorButton")
         .accessibilityLabel(isPresented ? "Hide inspector" : "Show inspector")
     }
@@ -386,6 +394,7 @@ public struct WorkspaceOverflowMenu<RunMenuItem: View>: View {
                 WorkspaceRequestLogToggle(isShown: state.isRequestLogShown, action: actions.toggleRequestLog)
                 WorkspaceInspectorToggle(isPresented: state.isInspectorPresented,
                                          canPresent: state.canPresentInspector,
+                                         hasRoom: state.inspectorHasRoom,
                                          action: actions.toggleInspector)
             }
             if unmatchedCount > 0 {
