@@ -161,19 +161,34 @@ enum UITestSupport {
     /// What AppKit names every frame it autosaves in the defaults: `NSWindow Frame <autosave name>`.
     static let autosavedWindowFramePrefix = "NSWindow Frame "
 
-    /// Removes every window frame AppKit autosaved in `defaults`, and nothing else.
+    /// What AppKit names every split view arrangement it autosaves: `NSSplitView Subview Frames
+    /// <autosave name>`, each pane's frame and whether it is collapsed.
+    ///
+    /// SwiftUI autosaves the navigator's `NavigationSplitView` this way, under
+    /// `<window autosave name>, SidebarNavigationSplitView`, in the same `.standard` domain as the
+    /// window frames. So a test that hid the navigator and ended there left every later launch
+    /// opening with it collapsed: on CI, `testHidingTheInspectorRemeasuresTheToolbar` hid it and
+    /// `testJourneysMenuDrivesTheActiveJourney` then failed twice, retry included, looking for a
+    /// Journeys tab in a navigator that was not showing (run 37190636173).
+    static let autosavedSplitViewPrefix = "NSSplitView Subview Frames "
+
+    /// Removes every window frame and split view arrangement AppKit autosaved in `defaults`, and
+    /// nothing else.
     ///
     /// ``stopFrameAutosave(_:)`` keeps a run from writing new frames; this clears the ones already
     /// there, which earlier runs wrote before it existed, so the window has nothing stale to reopen
-    /// at even before `WindowRoleFrame` moves it. The cost is that the developer's own Mimic, which
-    /// shares the domain, next opens at its default frame rather than where they left it.
+    /// at even before `WindowRoleFrame` moves it. The split views have no such switch, since SwiftUI
+    /// owns the navigator's, so this is what starts each launch with the navigator open, as on a
+    /// clean runner. The cost is that the developer's own Mimic, which shares the domain, next opens
+    /// at its default frame and navigator width rather than where they left them.
     ///
     /// `defaults` only removes keys in its own domain, so a suite in a unit test cannot reach the
     /// app's. Called with `.standard` only from ``resetAppIfNeeded()``, never from the injectable
     /// ``resetApp(contextProvider:)`` that unit tests call: their host is the app, so its `.standard`
     /// is the developer's real one.
     static func removeAutosavedWindowFrames(from defaults: UserDefaults) {
-        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(autosavedWindowFramePrefix) {
+        let prefixes = [autosavedWindowFramePrefix, autosavedSplitViewPrefix]
+        for key in defaults.dictionaryRepresentation().keys where prefixes.contains(where: { key.hasPrefix($0) }) {
             defaults.removeObject(forKey: key)
         }
     }
@@ -333,9 +348,9 @@ enum UITestSupport {
     }
 
     /// The reset a UI test launch runs, once, before `AppState` opens the store and before any
-    /// window exists: ``resetApp(contextProvider:)``, then the autosaved window frames
-    /// (``removeAutosavedWindowFrames(from:)``), so the first window cannot reopen at a frame an
-    /// earlier test left.
+    /// window exists: ``resetApp(contextProvider:)``, then the autosaved window frames and split
+    /// view arrangements (``removeAutosavedWindowFrames(from:)``), so the first window cannot reopen
+    /// at a frame, or with a navigator collapsed, as an earlier test left it.
     static func resetAppIfNeeded() {
         guard hasResetCurrentProcess == false else { return }
         hasResetCurrentProcess = true

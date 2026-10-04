@@ -46,7 +46,7 @@ struct UITestWindowIsolationTests {
         #expect(ScreenGeometry.visibleFrame(of: NSScreen.main) == NSScreen.main?.visibleFrame)
     }
 
-    @Test("Forgetting autosaved window frames removes those and nothing else")
+    @Test("Forgetting autosaved window frames removes those, the split views, and nothing else")
     func autosavedWindowFramesAreForgotten() throws {
         // A suite of its own, never `.standard`: this test's host is the app, whose `.standard` is
         // the developer's real one.
@@ -56,14 +56,25 @@ struct UITestWindowIsolationTests {
         // The shapes AppKit writes: the frame, then the screen it was on.
         defaults.set("344 31 680 677 0 0 1024 768 ", forKey: "NSWindow Frame SwiftUI.ModifiedContent-1-AppWindow-1")
         defaults.set("0 60 1024 677 0 0 1024 768 ", forKey: "NSWindow Frame main-AppWindow-1")
+        // A navigator a test collapsed: SwiftUI's split view, then each pane's frame and state.
+        defaults.set(
+            ["0.000000, 0.000000, 264.000000, 674.000000, YES, NO",
+             "0.000000, 0.000000, 1024.000000, 674.000000, NO, NO"],
+            forKey: "NSSplitView Subview Frames SwiftUI.ModifiedContent-1-AppWindow-1, SidebarNavigationSplitView"
+        )
         defaults.set(["Shell Layout"], forKey: "recentProjects")
         defaults.set("kept", forKey: "NSWindowFrameWithoutTheSpace")
+        defaults.set("kept", forKey: "NSSplitViewSubviewFramesWithoutTheSpace")
 
         UITestSupport.removeAutosavedWindowFrames(from: defaults)
 
         #expect(defaults.object(forKey: "NSWindow Frame SwiftUI.ModifiedContent-1-AppWindow-1") == nil)
         #expect(defaults.object(forKey: "NSWindow Frame main-AppWindow-1") == nil)
+        #expect(defaults.object(
+            forKey: "NSSplitView Subview Frames SwiftUI.ModifiedContent-1-AppWindow-1, SidebarNavigationSplitView"
+        ) == nil)
         #expect(defaults.stringArray(forKey: "recentProjects") == ["Shell Layout"])
         #expect(defaults.string(forKey: "NSWindowFrameWithoutTheSpace") == "kept")
+        #expect(defaults.string(forKey: "NSSplitViewSubviewFramesWithoutTheSpace") == "kept")
     }
 }

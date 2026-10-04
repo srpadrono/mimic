@@ -136,10 +136,14 @@ struct BreadcrumbPage {
             file: file,
             line: line
         )
-        crumbElement.click()
-
         let plain = app.menuItems[optionTitle]
         let selected = app.menuItems["\(optionTitle), selected"]
+        XCTAssertTrue(
+            UITestApp.click(crumbElement, expecting: { plain.exists || selected.exists }),
+            "The \(level) crumb's menu should open — \(UITestApp.describe(crumbElement))",
+            file: file,
+            line: line
+        )
         XCTAssertTrue(
             UITestApp.waitForAny([plain, selected], timeout: 5),
             "The \(level) crumb's menu should offer \"\(optionTitle)\"",
@@ -555,7 +559,9 @@ final class WorkspaceShellUITests: MimicUITestCase {
 
     @MainActor
     private func showInspectorIfHidden() {
-        guard !inspectorHeader.exists else { return }
+        // ⌥⌘I is a toggle: decided on the inspector the app settles on, so one it is still
+        // bringing in is not shut.
+        guard !workspace.settledInspectorIsShown() else { return }
         app.typeKey("i", modifierFlags: [.command, .option])
         _ = inspectorHeader.waitToExist(timeout: 5)
     }
@@ -598,8 +604,14 @@ final class WorkspaceShellUITests: MimicUITestCase {
     ///
     /// `JourneyUITests` deliberately goes through the menu instead, to exercise the
     /// `navigatorRequest` hop; the tab is the other path, and the one SHELL-08 is about.
+    ///
+    /// The strip is part of the navigator, so the navigator is opened first if it is collapsed: a
+    /// state the window can be in, and the one a launch inherited on CI whenever an earlier test hid
+    /// the navigator (run 37190636173). Not a delay: with the navigator open it is one snapshot.
     @MainActor
     private func showJourneysNavigator() {
+        workspace.showSidebarIfNeeded()
+        XCTAssertTrue(workspace.navigatorIsShown, "The navigator should be open before its tab is clicked")
         let tab = shell.journeysTab
         XCTAssertTrue(tab.waitToExist(timeout: 5), "The navigator should offer a Journeys tab")
         tab.click()
@@ -609,7 +621,11 @@ final class WorkspaceShellUITests: MimicUITestCase {
     /// Adds a built-in template journey, optionally activating it as it lands.
     @MainActor
     private func addTemplate(_ id: String, activate: Bool) {
-        journeys.addButton.click()
+        let addButton = journeys.addButton
+        XCTAssertTrue(
+            UITestApp.click(addButton, expecting: { self.journeys.templateMenuItem.exists }),
+            "The navigator's add menu should open — \(UITestApp.describe(addButton))"
+        )
         XCTAssertTrue(
             journeys.templateMenuItem.waitToExist(timeout: 5),
             "The navigator's add menu should offer templates"
@@ -976,8 +992,10 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180)
         XCTAssertTrue(breadcrumb.earlierLocations.waitToExist(timeout: 5),
                       "The compact jump bar should move earlier locations into its menu")
-        breadcrumb.earlierLocations.click()
-        XCTAssertTrue(app.menuItems["Checkout"].waitToExist(timeout: 5))
+        let checkout = app.menuItems["Checkout"]
+        XCTAssertTrue(UITestApp.click(breadcrumb.earlierLocations, expecting: { checkout.exists }),
+                      "The earlier-locations menu should open — \(UITestApp.describe(breadcrumb.earlierLocations))")
+        XCTAssertTrue(checkout.waitToExist(timeout: 5))
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
     }
 
@@ -1142,8 +1160,9 @@ final class WorkspaceShellUITests: MimicUITestCase {
         XCTAssertTrue(navigator.row(named: "First").waitToDisappear(timeout: 5))
         navigator.filter(navigator.endpointFilter, text: "no matching route")
         XCTAssertTrue(navigator.noEndpointMatches.waitToExist(timeout: 5))
-        navigator.methodScope.click()
         let postScope = navigator.scopeOption("POST")
+        XCTAssertTrue(UITestApp.click(navigator.methodScope, expecting: { postScope.exists }),
+                      "The method scope menu should open and list POST — \(UITestApp.describe(navigator.methodScope))")
         XCTAssertTrue(postScope.waitToExist(timeout: 5))
         postScope.click()
         createEndpointViaUI(name: "Second", path: "/api/second")
@@ -1478,8 +1497,11 @@ final class WorkspaceShellUITests: MimicUITestCase {
 
         // Reachable from either navigator mode through the menu bar; the footer holds only the
         // filter and Add, as the design draws it.
-        app.menuBars.menuBarItems["Journeys"].click()
+        let journeysMenu = app.menuBars.menuBarItems["Journeys"]
         let showActive = app.menuItems["Show Active Journey"].firstMatch
+        // Hittable, not merely present: a menu bar's items are in the tree while their menu is closed.
+        XCTAssertTrue(UITestApp.click(journeysMenu, expecting: { showActive.exists && showActive.isHittable }),
+                      "The Journeys menu should open — \(UITestApp.describe(journeysMenu))")
         XCTAssertTrue(showActive.waitToExist(timeout: 5), "Journeys ▸ Show Active Journey should be listed")
         XCTAssertTrue(showActive.isEnabled, "…and enabled while a journey is running")
         UITestApp.dismissAnyOpenMenu(in: app)
@@ -1826,7 +1848,10 @@ final class WorkspaceShellUITests: MimicUITestCase {
             }
         }
 
-        overflow.click()
+        let firstSecondary = Self.secondaryToolbarActions[0]
+        let firstSecondaryItem = workspace.overflowItem(firstSecondary.identifier, titled: firstSecondary.titles)
+        XCTAssertTrue(UITestApp.click(overflow, expecting: { firstSecondaryItem.exists }),
+                      "More actions should open — \(UITestApp.describe(overflow))", file: file, line: line)
         if folded {
             let run = workspace.serverToggleMenuItem
             XCTAssertTrue(run.waitToExist(timeout: 5), "More actions should lead with Run/Stop",
@@ -2190,8 +2215,9 @@ final class WorkspaceShellUITests: MimicUITestCase {
         } else {
             let overflow = workspace.overflowMenu
             XCTAssertTrue(overflow.waitToExist(timeout: 5))
-            overflow.click()
             let showUnmatched = app.menuItems["toolbar.showUnmatched"]
+            XCTAssertTrue(UITestApp.click(overflow, expecting: { showUnmatched.exists }),
+                          "More actions should open — \(UITestApp.describe(overflow))")
             XCTAssertTrue(showUnmatched.waitToExist(timeout: 5))
             showUnmatched.click()
         }
@@ -2675,7 +2701,9 @@ final class WorkspaceShellUITests: MimicUITestCase {
         workspace.fillWindow()
 
         let inspectorHeader = app.descendants(matching: .any).matching(identifier: "inspector.header").firstMatch
-        if inspectorHeader.exists {
+        // On the inspector the app settles on once the window has filled, not the one on screen
+        // this instant: one that arrives a moment later would be measured as part of the floor.
+        if workspace.settledInspectorIsShown() {
             app.typeKey("i", modifierFlags: [.command, .option])
             XCTAssertTrue(inspectorHeader.waitToDisappear(timeout: 5), "⌥⌘I should hide the inspector")
         }

@@ -41,6 +41,13 @@ class MimicUITestCase: XCTestCase {
     }
 
     override func tearDownWithError() throws {
+        // A failed test on a Mac where another app floats a window over the test window says so,
+        // since a click into that window looks like a click that did nothing.
+        if (testRun?.totalFailureCount ?? 0) > 0,
+           let floating = MainActor.assumeIsolated({ UITestEnvironment.describeWindowsFloatingOverTests() }) {
+            print("warning: \(floating)")
+            XCTContext.runActivity(named: floating) { _ in }
+        }
         app = nil
         welcome = nil
         newProjectSheet = nil
@@ -163,6 +170,10 @@ class MimicUITestCase: XCTestCase {
         // lives in that navigator, so make the page object restore it before querying the button.
         workspace.showSidebarIfNeeded()
         XCTAssertTrue(workspace.addEndpointButton.waitToExist(timeout: 5), "Add endpoint should be reachable")
+        // Read before the endpoint lands: a project's first endpoint makes the app present the
+        // inspector, after the editor, so the layout is only settled once that has happened.
+        let inspectorWasShown = app.descendants(matching: .any)
+            .matching(identifier: "inspector.header").firstMatch.exists
         let addEndpoint = workspace.addEndpointButton
         XCTAssertTrue(
             UITestApp.click(addEndpoint, expecting: { self.newEndpointSheet.nameField.exists }),
@@ -180,6 +191,11 @@ class MimicUITestCase: XCTestCase {
 
         newEndpointSheet.createButton.click()
         _ = endpointEditor.pathLabel.waitToExist(timeout: 5)
+        // Every caller then sees the panels the app settles on, whatever it does next: arrange
+        // them, toggle the inspector, or look for a scenario row in it.
+        if !inspectorWasShown {
+            workspace.settledInspectorIsShown()
+        }
     }
 
     /// Picks a method in the new-endpoint sheet, and proves it took by the picker's value.

@@ -233,7 +233,18 @@ final class LayoutAuditUITests: MimicUITestCase {
         createProjectViaUI(name: "Round trips")
         resize(to: .fill)
         createEndpointViaUI(name: "List users", path: "/users")
-        let arranged = setPanels(sidebar: true, inspector: true, log: .shown)
+        // The first endpoint gives the inspector something to show, and the app brings the column in
+        // on its own a moment after the editor appears: the panel is shown by default
+        // (`PanelLayout.default`) and an empty project only held it back. ⌥⌘I is a toggle, so
+        // arranging the panels from a reading taken before the column arrives shuts it. On CI the
+        // window was read at t=10.90s, the column slid in at about 11.05s and the chord sent at
+        // 11.43s closed it, so every later trip was measured against a baseline with no inspector
+        // (run 37190636173). Wait for the column the app is bringing in, then arrange around it;
+        // the settle below lets it finish arriving. If it never comes, `setInspector` opens it.
+        let arriving = waitForPanes(timeout: 5) { $0.shown("inspector") != nil }
+        let arranged = setPanels(
+            sidebar: true, inspector: true, log: .shown, from: arriving.isReadable ? arriving : nil
+        )
         let before = anchors(settle(after: arranged))
 
         let trips: [(String, @MainActor () -> Void)] = [
@@ -361,8 +372,10 @@ final class LayoutAuditUITests: MimicUITestCase {
 
     @MainActor
     @discardableResult
-    private func setPanels(sidebar: Bool, inspector: Bool, log: LogState) -> PaneFrames {
-        var panes = setSidebar(sidebar)
+    private func setPanels(
+        sidebar: Bool, inspector: Bool, log: LogState, from earlier: PaneFrames? = nil
+    ) -> PaneFrames {
+        var panes = setSidebar(sidebar, from: earlier)
         panes = setInspector(inspector, from: panes)
         return setLog(log, from: panes)
     }

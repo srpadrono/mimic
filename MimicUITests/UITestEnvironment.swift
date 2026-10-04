@@ -18,9 +18,10 @@ import XCTest
 /// one path every suite launches through. A suite that sets one of these values itself keeps its
 /// own: the appearance tests choose dark or light, and nothing here overrides them.
 ///
-/// What this cannot pin: menus, pop-ups and sheets that AppKit places on the real screen, which near
-/// its bottom edge can open differently on a taller display, and the section views that size a sheet
-/// from the main screen's height themselves.
+/// What this cannot pin: menus, pop-ups and sheets, which AppKit places on the real screen. The app
+/// puts the pinned frame in the real screen's top left corner, the one nothing floats over, so near
+/// the window's right or bottom edge a menu can open the other way from CI; the menu helpers check
+/// what opened, not where.
 enum UITestEnvironment {
 
     /// CI's visible frame, in points: the 1024×768 display under the menu bar and above the Dock, as
@@ -89,6 +90,57 @@ enum UITestEnvironment {
             file: file,
             line: line
         )
+    }
+}
+
+extension UITestEnvironment {
+    /// Processes whose floating windows are part of macOS, or of the test itself.
+    private static let ownersAllowedAbove: Set<String> = [
+        "Window Server", "Dock", "SystemUIServer", "Control Center", "Control Centre", "Notification Center",
+        "Notification Centre", "WindowManager", "Spotlight", "TextInputMenuAgent", "loginwindow", "screencaptureui",
+        // XCUITest's own automation mode overlay, over the whole display while a run drives it.
+        "AutomationModeUI",
+        "Mimic", "MimicUITests-Runner",
+    ]
+
+    /// Other apps' windows that float above every window over the area UI tests use, described for a
+    /// failure, or `nil` when there are none.
+    ///
+    /// A window on a raised level takes every click inside it, whatever is beneath. On one
+    /// developer's Mac a dictation app keeps a 512×614 window at level 1000 over the bottom middle of
+    /// the screen; every click a test aimed into that rectangle went to it, and tests failed with
+    /// "the menu should open" or "the sheet should open" and nothing to say why. CI's runners are
+    /// fresh, with no such window, so this only describes; it never fails a test itself, because a
+    /// window list misread on CI would otherwise fail every one.
+    @MainActor
+    static func describeWindowsFloatingOverTests() -> String? {
+        guard let main = NSScreen.screens.first,
+              let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+                as? [[String: Any]]
+        else { return nil }
+        // The pinned frame, as the app places it (the top left of the visible frame), in the window
+        // list's coordinates: points from the top left of the main display.
+        let visible = main.visibleFrame
+        let width = min(screen.width, visible.width)
+        let height = min(screen.height, visible.height)
+        let testArea = CGRect(x: visible.minX, y: main.frame.maxY - visible.maxY, width: width, height: height)
+        let floating = windows.compactMap { window -> String? in
+            guard let layer = window[kCGWindowLayer as String] as? Int, layer > 0,
+                  let owner = window[kCGWindowOwnerName as String] as? String,
+                  !ownersAllowedAbove.contains(owner),
+                  (window[kCGWindowAlpha as String] as? Double ?? 1) > 0,
+                  let bounds = window[kCGWindowBounds as String] as? NSDictionary,
+                  let frame = CGRect(dictionaryRepresentation: bounds)
+            else { return nil }
+            // A window the size of a whole display is a system overlay that passes clicks through.
+            guard !NSScreen.screens.contains(where: { $0.frame.size == frame.size }) else { return nil }
+            let overlap = frame.intersection(testArea)
+            guard !overlap.isNull, overlap.width * overlap.height > 1_000 else { return nil }
+            return "\(owner) at level \(layer), \(Int(frame.width))×\(Int(frame.height))pt at (\(Int(frame.minX)), \(Int(frame.minY)))"
+        }
+        guard !floating.isEmpty else { return nil }
+        return "Another app keeps a window above every other over the UI test window, and clicks inside it go "
+            + "to that app: \(floating.joined(separator: "; ")). Quit it while UI tests run."
     }
 }
 

@@ -783,7 +783,7 @@ struct WorkspaceFeatureLogicTests {
         // CI's own display: the pinned frame is its visible frame, exactly.
         let ci = CGRect(x: 0, y: 63, width: 1024, height: 674)
         #expect(ScreenGeometry.pinnedFrame(pin, in: ci) == ci)
-        // A 1920×1080 display under a 37pt menu bar, Dock hidden: the top edge stays where it is.
+        // A 1920×1080 display under a 37pt menu bar, Dock hidden: the top left corner stays put.
         let large = CGRect(x: 0, y: 0, width: 1920, height: 1043)
         #expect(ScreenGeometry.pinnedFrame(pin, in: large) == CGRect(x: 0, y: 369, width: 1024, height: 674))
         // A second display left of and above the main one keeps its own origin.

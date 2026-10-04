@@ -315,8 +315,9 @@ final class WelcomeProjectUITests: MimicUITestCase {
         launchApp()
 
         XCTAssertTrue(welcome.importMenu.waitToExist(timeout: 5))
-        welcome.importMenu.click()
         let harItem = welcome.importHARMenuItem
+        XCTAssertTrue(UITestApp.click(welcome.importMenu, expecting: { harItem.exists }),
+                      "The import menu should open — \(UITestApp.describe(welcome.importMenu))")
         XCTAssertTrue(harItem.waitToExist(timeout: 3), "The import menu should offer a HAR file")
         XCTAssertTrue(welcome.importOpenAPIMenuItem.exists,
                       "The import menu should offer an OpenAPI spec")
@@ -945,9 +946,11 @@ final class WelcomeProjectUITests: MimicUITestCase {
     private func closeProjectMenuItemIsEnabled() -> Bool {
         let fileMenu = app.menuBars.menuBarItems["File"]
         XCTAssertTrue(fileMenu.waitToExist(timeout: 5), "The File menu should exist")
-        fileMenu.click()
-
         let item = app.menuItems["Close Project"]
+        // Hittable, not merely present: as the note below says, the item is in the tree with the menu
+        // closed, and an unopened menu's `isEnabled` is the stale answer this reads.
+        XCTAssertTrue(UITestApp.click(fileMenu, expecting: { item.exists && item.isHittable }),
+                      "The File menu should open — \(UITestApp.describe(fileMenu))")
         XCTAssertTrue(item.waitToExist(timeout: 3), "File ▸ Close Project should exist")
         let isEnabled = item.isEnabled
 

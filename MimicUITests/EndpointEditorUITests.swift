@@ -2106,9 +2106,9 @@ final class EndpointEditorUITests: MimicUITestCase {
         createEndpointViaUI(name: "Keep Me", path: "/api/keep")
 
         XCTAssertTrue(endpointEditor.moreMenu.waitToExist(timeout: 5))
-        endpointEditor.moreMenu.click()
-
         let deleteItem = app.menuItems["Delete endpoint\u{2026}"]
+        XCTAssertTrue(UITestApp.click(endpointEditor.moreMenu, expecting: { deleteItem.exists }),
+                      "The endpoint menu should open — \(UITestApp.describe(endpointEditor.moreMenu))")
         XCTAssertTrue(deleteItem.waitToExist(timeout: 5))
         deleteItem.click()
 

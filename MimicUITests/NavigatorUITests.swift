@@ -29,8 +29,11 @@ struct NavigatorPage {
     }
     /// Journeys ▸ Show Active Journey. The navigator's footer holds only the filter and Add.
     func showActiveJourneyFromMenu() {
-        app.menuBars.menuBarItems["Journeys"].click()
+        let journeysMenu = app.menuBars.menuBarItems["Journeys"]
         let item = app.menuItems["Show Active Journey"].firstMatch
+        // Hittable, not merely present: a menu bar's items are in the tree while their menu is closed.
+        XCTAssertTrue(UITestApp.click(journeysMenu, expecting: { item.exists && item.isHittable }),
+                      "The Journeys menu should open — \(UITestApp.describe(journeysMenu))")
         XCTAssertTrue(item.waitToExist(timeout: 5), "Journeys ▸ Show Active Journey should be listed")
         item.click()
     }
@@ -523,7 +526,8 @@ final class NavigatorUITests: MimicUITestCase {
         navigator.journeyGroup("ungrouped").click()
         XCTAssertTrue(navigator.row(named: "Empty journey").waitToDisappear(timeout: 5))
         let journeys = JourneysNavigatorPage(app: app)
-        journeys.addButton.click()
+        XCTAssertTrue(UITestApp.click(journeys.addButton, expecting: { journeys.newEmptyMenuItem.exists }),
+                      "The add menu should open — \(UITestApp.describe(journeys.addButton))")
         XCTAssertTrue(journeys.newEmptyMenuItem.waitToExist(timeout: 5))
         journeys.newEmptyMenuItem.click()
         let newJourney = NewJourneySheetPage(app: app)

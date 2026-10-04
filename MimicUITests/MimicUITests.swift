@@ -481,10 +481,10 @@ final class MimicUITests: MimicUITestCase {
         createEndpointViaUI(name: "To Delete", path: "/api/delete-me")
 
         XCTAssertTrue(endpointEditor.moreMenu.waitToExist(timeout: 5))
-        endpointEditor.moreMenu.click()
-
         // Click "Delete endpoint…" from the more-options menu
         let deleteMenuItem = app.menuItems["Delete endpoint\u{2026}"]
+        XCTAssertTrue(UITestApp.click(endpointEditor.moreMenu, expecting: { deleteMenuItem.exists }),
+                      "The endpoint menu should open — \(UITestApp.describe(endpointEditor.moreMenu))")
         XCTAssertTrue(deleteMenuItem.waitToExist(timeout: 3))
         deleteMenuItem.click()
 
@@ -543,9 +543,13 @@ final class MimicUITests: MimicUITestCase {
         createProjectViaUI(name: "Dup Scenario Test")
         createEndpointViaUI(name: "Dup EP", path: "/api/dup")
 
-        // Right-click the Default scenario to duplicate
-        let defaultRow = inspector.findScenario(named: "Default")
-        XCTAssertTrue(defaultRow.waitToExist(timeout: 5))
+        // Right-click the Default scenario to duplicate. The inspector is hidden for an empty project
+        // and presented only once this first endpoint exists, a beat after the editor (about 0.3 s on
+        // CI), so the row is waited for rather than looked for once.
+        let defaultRow = inspector.scenarioRow(named: "Default")
+        XCTAssertTrue(defaultRow.waitToExist(timeout: 5),
+                      "Creating the first endpoint should list its Default scenario in the inspector")
+        UITestApp.waitForStableFrame(defaultRow)
         defaultRow.rightClick()
 
         let duplicateItem = app.menuItems["Duplicate"]
@@ -553,7 +557,7 @@ final class MimicUITests: MimicUITestCase {
         duplicateItem.click()
 
         // Duplicated scenario should appear
-        let copyRow = inspector.findScenario(named: "Default (Copy)")
+        let copyRow = inspector.scenarioRow(named: "Default (Copy)")
         XCTAssertTrue(copyRow.waitToExist(timeout: 5),
                       "Duplicated scenario 'Default (Copy)' should appear in list")
     }
@@ -566,22 +570,30 @@ final class MimicUITests: MimicUITestCase {
         createProjectViaUI(name: "Switch Test")
         createEndpointViaUI(name: "Switch EP", path: "/api/switch")
 
-        // Duplicate to get a second scenario
-        let defaultRow = inspector.findScenario(named: "Default")
-        XCTAssertTrue(defaultRow.waitToExist(timeout: 5))
+        // Duplicate to get a second scenario. Waited for, as in `testDuplicateScenario`: the
+        // inspector arrives after the editor.
+        let defaultRow = inspector.scenarioRow(named: "Default")
+        XCTAssertTrue(defaultRow.waitToExist(timeout: 5),
+                      "Creating the first endpoint should list its Default scenario in the inspector")
+        UITestApp.waitForStableFrame(defaultRow)
         defaultRow.rightClick()
 
-        app.menuItems["Duplicate"].click()
+        let duplicateItem = app.menuItems["Duplicate"]
+        XCTAssertTrue(duplicateItem.waitToExist(timeout: 3), "The scenario's context menu should offer Duplicate")
+        duplicateItem.click()
 
-        let copyRow = inspector.findScenario(named: "Default (Copy)")
-        XCTAssertTrue(copyRow.waitToExist(timeout: 5))
+        let copyRow = inspector.scenarioRow(named: "Default (Copy)")
+        XCTAssertTrue(copyRow.waitToExist(timeout: 5), "Duplicating should list 'Default (Copy)'")
 
         // The row's radio makes a scenario live; clicking the row itself only opens it.
         inspector.makeLive(named: "Default (Copy)")
 
-        // Verify it became active
-        XCTAssertTrue(inspector.isScenarioActive(named: "Default (Copy)"),
-                      "The scenario whose radio was clicked should become active")
+        // Verify it became active. Polled, as `NavigatorUITests` does: the row's value is redrawn
+        // after the click, and the one read here used to come a second late, inside XCTest's wait.
+        XCTAssertTrue(
+            UITestApp.waitUntil(timeout: 5) { self.inspector.isScenarioActive(named: "Default (Copy)") },
+            "The scenario whose radio was clicked should become active"
+        )
     }
 
     // MARK: - 22. Search Filter in Sidebar
@@ -870,9 +882,12 @@ final class MimicUITests: MimicUITestCase {
         )
 
         // Closing gives the column back to the editor, and the inspector to what it was showing.
-        requestDetail.closeButton.click()
+        // Through `UITestApp.click`, which waits for the button to be hittable and still: clicked
+        // the moment the copy confirmation appeared, the header was mid-layout and XCUITest sent
+        // the click to an infinite point, so the request stayed open.
+        let centrePane = app.descendants(matching: .any).matching(identifier: "centerPane").firstMatch
         XCTAssertTrue(
-            app.descendants(matching: .any).matching(identifier: "centerPane").firstMatch.waitToExist(timeout: 5),
+            UITestApp.click(requestDetail.closeButton, expecting: { centrePane.exists }),
             "Closing request detail should bring the endpoint editor back"
         )
         XCTAssertTrue(
@@ -983,13 +998,21 @@ final class MimicUITests: MimicUITestCase {
         XCTAssertTrue(importMenu.waitToExist(timeout: 5),
                       "Import menu button should exist in toolbar")
 
-        importMenu.click()
+        // `importHARMenuItem` picks its spelling when it is read, so it is read inside the check
+        // rather than bound before the menu is open.
+        XCTAssertTrue(UITestApp.click(importMenu, expecting: { self.workspace.importHARMenuItem.exists }),
+                      "The Import menu should open — \(UITestApp.describe(importMenu))")
 
         // Click HAR import menu item
         let harMenuItem = workspace.importHARMenuItem
         XCTAssertTrue(harMenuItem.waitToExist(timeout: 3),
                       "Import HAR menu item should exist")
-        harMenuItem.click()
+        // Not `harMenuItem.click()`. At CI's 1024pt screen edge this submenu opens to the left of
+        // More and has closed under the pointer on its way in, and XCUITest's second lookup of the
+        // item then raised `point.x != INFINITY` (run 37190636173). The helper clicks only once the
+        // item is open under the pointer; the sheet below is still the assertion.
+        XCTAssertTrue(UITestApp.clickSubmenuItem(harMenuItem, of: importMenu, in: app),
+                      "The Import submenu should stay open under the pointer for its HAR item")
 
         // HAR import sheet should appear with empty state
         XCTAssertTrue(harImportPage.emptyHeading.waitToExist(timeout: 5),
@@ -1011,13 +1034,18 @@ final class MimicUITests: MimicUITestCase {
         workspace.compactWindow()
         if !workspace.overflowMenu.exists { workspace.fillWindow() }
 
-        workspace.revealImportMenu().click()
+        let importMenu = workspace.revealImportMenu()
+        // Read inside the check for the same reason as the HAR test above.
+        XCTAssertTrue(UITestApp.click(importMenu, expecting: { self.workspace.importOpenAPIMenuItem.exists }),
+                      "The Import menu should open — \(UITestApp.describe(importMenu))")
 
         // Click OpenAPI import menu item
         let openAPIMenuItem = workspace.importOpenAPIMenuItem
         XCTAssertTrue(openAPIMenuItem.waitToExist(timeout: 3),
                       "Import OpenAPI menu item should exist")
-        openAPIMenuItem.click()
+        // The same left-opening submenu as the HAR test above, so the same in-place click.
+        XCTAssertTrue(UITestApp.clickSubmenuItem(openAPIMenuItem, of: importMenu, in: app),
+                      "The Import submenu should stay open under the pointer for its OpenAPI item")
 
         // OpenAPI import sheet should appear with empty state
         XCTAssertTrue(openAPIImportPage.emptyHeading.waitToExist(timeout: 5),
@@ -1129,7 +1157,8 @@ final class MimicUITests: MimicUITestCase {
         let journeys = JourneysNavigatorPage(app: app)
         WorkspaceShellPage(app: app).journeysTab.click()
         XCTAssertTrue(journeys.addButton.waitToExist(timeout: 5))
-        journeys.addButton.click()
+        XCTAssertTrue(UITestApp.click(journeys.addButton, expecting: { journeys.newEmptyMenuItem.exists }),
+                      "The add menu should open — \(UITestApp.describe(journeys.addButton))")
         XCTAssertTrue(journeys.newEmptyMenuItem.waitToExist(timeout: 5))
         journeys.newEmptyMenuItem.click()
         let newJourney = NewJourneySheetPage(app: app)

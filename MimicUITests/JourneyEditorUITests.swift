@@ -143,8 +143,11 @@ extension JourneysNavigatorPage {
 
     /// Journeys ▸ Show Active Journey: selects the active journey in the navigator.
     func showActiveJourneyFromMenu(file: StaticString = #filePath, line: UInt = #line) {
-        app.menuBars.menuBarItems["Journeys"].click()
+        let journeysMenu = app.menuBars.menuBarItems["Journeys"]
         let item = app.menuItems["Show Active Journey"].firstMatch
+        // Hittable, not merely present: a menu bar's items are in the tree while their menu is closed.
+        XCTAssertTrue(UITestApp.click(journeysMenu, expecting: { item.exists && item.isHittable }),
+                      "The Journeys menu should open — \(UITestApp.describe(journeysMenu))", file: file, line: line)
         guard item.waitToExist(timeout: 5) else {
             XCTFail("Journeys ▸ Show Active Journey should be listed", file: file, line: line)
             UITestApp.dismissAnyOpenMenu(in: app)
@@ -299,9 +302,10 @@ final class JourneyEditorUITests: MimicUITestCase {
 
         let journeysMenu = menuBar.menuBarItems["Journeys"]
         XCTAssertTrue(journeysMenu.waitToExist(timeout: 5), "Journeys menu should exist")
-        journeysMenu.click()
-
         let showItem = app.menuItems["Show Journeys"].firstMatch
+        // Hittable, not merely present: a menu bar's items are in the tree while their menu is closed.
+        XCTAssertTrue(UITestApp.click(journeysMenu, expecting: { showItem.exists && showItem.isHittable }),
+                      "Journeys menu should open — \(UITestApp.describe(journeysMenu))")
         XCTAssertTrue(showItem.waitToExist(timeout: 5), "Show Journeys item should exist")
         showItem.click()
 
@@ -1667,7 +1671,8 @@ final class JourneyEditorUITests: MimicUITestCase {
         launchWithProject()
         showJourneysNavigator()
 
-        journeys.addButton.click()
+        XCTAssertTrue(UITestApp.click(journeys.addButton, expecting: { self.journeys.newEmptyMenuItem.exists }),
+                      "The add menu should open — \(UITestApp.describe(journeys.addButton))")
         XCTAssertTrue(
             journeys.newEmptyMenuItem.waitToExist(timeout: 5),
             "The add menu should offer an empty journey"
@@ -1698,7 +1703,8 @@ final class JourneyEditorUITests: MimicUITestCase {
         )
 
         // JRNNEW-06 — Return in the name field is the keyboard path to the same result.
-        journeys.addButton.click()
+        XCTAssertTrue(UITestApp.click(journeys.addButton, expecting: { self.journeys.newEmptyMenuItem.exists }),
+                      "The add menu should open — \(UITestApp.describe(journeys.addButton))")
         XCTAssertTrue(journeys.newEmptyMenuItem.waitToExist(timeout: 5), "The add menu should reopen")
         journeys.newEmptyMenuItem.click()
         XCTAssertTrue(newJourneySheet.nameField.waitToExist(timeout: 5), "The sheet should reopen")

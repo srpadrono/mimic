@@ -620,7 +620,8 @@ final class ErrorAlertUITests: MimicUITestCase {
 
         journeysTab.click()
         XCTAssertTrue(journeys.waitUntilVisible(), "The journeys navigator should appear")
-        journeys.addButton.click()
+        XCTAssertTrue(UITestApp.click(journeys.addButton, expecting: { journeys.newEmptyMenuItem.exists }),
+                      "The add menu should open — \(UITestApp.describe(journeys.addButton))")
         XCTAssertTrue(journeys.newEmptyMenuItem.waitToExist(timeout: 5))
         journeys.newEmptyMenuItem.click()
         XCTAssertTrue(newJourneySheet.nameField.waitToExist(timeout: 5), "The naming sheet should open")
@@ -732,7 +733,8 @@ final class ErrorAlertUITests: MimicUITestCase {
         // ERRDEAD-05.
         let journeys = JourneysNavigatorPage(app: app)
         let newJourneySheet = NewJourneySheetPage(app: app)
-        journeys.addButton.click()
+        XCTAssertTrue(UITestApp.click(journeys.addButton, expecting: { journeys.newEmptyMenuItem.exists }),
+                      "The add menu should open — \(UITestApp.describe(journeys.addButton))")
         XCTAssertTrue(journeys.newEmptyMenuItem.waitToExist(timeout: 5))
         journeys.newEmptyMenuItem.click()
         XCTAssertTrue(newJourneySheet.nameField.waitToExist(timeout: 5))

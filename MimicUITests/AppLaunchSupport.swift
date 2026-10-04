@@ -347,9 +347,12 @@ enum UITestApp {
             waitForStableFrame(parent)
             parent.click()
 
-            guard item.waitToExist(timeout: menuTimeout) else { continue }
-            waitForStableFrame(item)
-            item.click()
+            // Clicked in place, not with `item.click()`, whose second lookup can read a submenu that
+            // closed under the pointer (``clickSubmenuItem(_:of:in:attempts:)``). One try: a submenu
+            // that closed is what this loop's next attempt reopens it for.
+            guard item.waitToExist(timeout: menuTimeout),
+                  clickSubmenuItem(item, of: parent, in: app, attempts: 1)
+            else { continue }
 
             // The full clock only on the way out. An intermediate attempt that waits fifteen seconds
             // for something a missed click means will never come turns a three-attempt helper into a
@@ -359,6 +362,72 @@ enum UITestApp {
             if outcome.waitToExist(timeout: wait) { return true }
         }
         return outcome.exists
+    }
+
+    /// Clicks `item`, an item of the submenu that `parent` opens, once the pointer is on it and the
+    /// submenu is still open, and returns whether it clicked.
+    ///
+    /// **Not `item.click()`.** XCUITest moves the pointer onto a menu item, then looks the item up
+    /// again and clicks where that second lookup says it is. Moving into a submenu means leaving its
+    /// parent's menu, and on CI the submenu has closed during that move: run 37190636173 recorded
+    /// More ▸ Import, which opens to the *left* of More at the 1024pt screen's right edge, closing as
+    /// the pointer crossed into it on both attempts of `testImportMenuOpensHARSheet`. The second
+    /// lookup then read a closed menu's item: once a stale, unhittable frame, which XCUITest hovered
+    /// for seven seconds before its own retry reopened the submenu, and once an infinite one, which
+    /// raised `point.x != INFINITY` inside XCUITest and ended the test with no retry. A larger
+    /// display leaves room on the right, where the submenu opens instead, so it never failed
+    /// locally: the pinned screen sizes the window, but AppKit places menus on the real one.
+    ///
+    /// **What this does instead.** It reads the item's frame until two readings agree, moves the
+    /// pointer to its middle as an offset from the window, which an open menu does not move, and
+    /// clicks that same point only once two readings a poll apart find the item still hittable
+    /// there. The click therefore neither moves the pointer nor looks the item up. When the submenu
+    /// closed under the move, it hovers `parent` again, which is how AppKit reopens a submenu, and
+    /// tries again; each retry is an activity in the result bundle.
+    ///
+    /// `parent` is the submenu's own item in the enclosing menu. Hovering a button opens nothing, so
+    /// an item of a first-level menu gets `attempts: 1`. Returns false when the item never stayed
+    /// open under the pointer; what the item opens is still the caller's assertion.
+    @MainActor
+    @discardableResult
+    static func clickSubmenuItem(
+        _ item: XCUIElement,
+        of parent: XCUIElement,
+        in app: XCUIApplication,
+        attempts: Int = 3
+    ) -> Bool {
+        let rounds = max(1, attempts)
+        for attempt in 1...rounds {
+            if attempt > 1 {
+                XCTContext.runActivity(
+                    named: "The submenu closed as the pointer moved onto \(describe(item)); hovering "
+                        + "\(describe(parent)) to reopen it (attempt \(attempt) of \(rounds))"
+                ) { _ in }
+                guard parent.exists, parent.isHittable, let frame = waitForStableFrame(parent) else { return false }
+                windowAnchoredCoordinate(of: CGPoint(x: frame.midX, y: frame.midY), in: app).hover()
+            }
+            guard waitUntil(timeout: 3, pollInterval: 0.1, { item.exists && item.isHittable }),
+                  let frame = waitForStableFrame(item)
+            else { continue }
+            let point = windowAnchoredCoordinate(of: CGPoint(x: frame.midX, y: frame.midY), in: app)
+            point.hover()
+            // Open under the pointer twice in a row, at the frame the point came from: a submenu
+            // that closed on the way in reads unhittable (or leaves the tree) here.
+            var openReadings = 0
+            var closed = false
+            waitUntil(timeout: 1, pollInterval: 0.1) {
+                guard item.exists, item.isHittable, (try? item.snapshot())?.frame == frame else {
+                    closed = true
+                    return true
+                }
+                openReadings += 1
+                return openReadings == 2
+            }
+            guard !closed, openReadings == 2 else { continue }
+            point.click()
+            return true
+        }
+        return false
     }
 
     /// Picks an item from the pop-up `menu` by typing `typeSelection` and Return, and returns once

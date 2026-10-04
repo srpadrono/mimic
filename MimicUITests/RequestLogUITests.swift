@@ -664,8 +664,9 @@ final class RequestLogUITests: MimicUITestCase {
             let overflow = WorkspacePage(app: app).overflowMenu
             XCTAssertTrue(overflow.waitToExist(timeout: 5))
             XCTAssertEqual(overflow.value as? String, "1 unmatched request")
-            overflow.click()
             let showUnmatched = app.menuItems["toolbar.showUnmatched"]
+            XCTAssertTrue(UITestApp.click(overflow, expecting: { showUnmatched.exists }),
+                          "More actions should open — \(UITestApp.describe(overflow))")
             XCTAssertTrue(showUnmatched.waitToExist(timeout: 5))
             showUnmatched.click()
         }

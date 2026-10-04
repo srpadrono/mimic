@@ -232,7 +232,9 @@ struct UpdateSheetPage {
     func openFromMenu() {
         let mimicMenu = app.menuBars.menuBarItems.element(boundBy: 1)
         XCTAssertTrue(mimicMenu.waitToExist(timeout: 5), "the Mimic menu should exist")
-        mimicMenu.click()
+        // Hittable, not merely present: a menu bar's items are in the tree while their menu is closed.
+        XCTAssertTrue(UITestApp.click(mimicMenu, expecting: { menuItem.exists && menuItem.isHittable }),
+                      "the Mimic menu should open — \(UITestApp.describe(mimicMenu))")
         XCTAssertTrue(menuItem.waitToExist(timeout: 5), "Check for Updates… should be in the menu")
         menuItem.click()
     }

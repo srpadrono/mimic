@@ -222,9 +222,10 @@ final class JourneyUITests: XCTestCase {
 
         let journeysMenu = menuBar.menuBarItems["Journeys"]
         XCTAssertTrue(journeysMenu.waitToExist(timeout: 5), "Journeys menu should exist")
-        journeysMenu.click()
-
         let showItem = app.menuItems["Show Journeys"]
+        // Hittable, not merely present: a menu bar's items are in the tree while their menu is closed.
+        XCTAssertTrue(UITestApp.click(journeysMenu, expecting: { showItem.exists && showItem.isHittable }),
+                      "Journeys menu should open — \(UITestApp.describe(journeysMenu))")
         XCTAssertTrue(showItem.waitToExist(timeout: 5), "Show Journeys item should exist")
         showItem.click()
 
@@ -516,8 +517,11 @@ final class JourneyUITests: XCTestCase {
         // reach the journeys window and close *that*. And not the "Close" item beside it, which is
         // the same AppKit command — "Close Project" is the app's own, and it is the one that returns
         // you to the welcome window rather than disposing of the window you are in.
-        app.menuBars.firstMatch.menuBarItems["File"].click()
+        let fileMenu = app.menuBars.firstMatch.menuBarItems["File"]
         let closeItem = app.menuItems["Close Project"]
+        // Hittable, not merely present: a menu bar's items are in the tree while their menu is closed.
+        XCTAssertTrue(UITestApp.click(fileMenu, expecting: { closeItem.exists && closeItem.isHittable }),
+                      "The File menu should open — \(UITestApp.describe(fileMenu))")
         XCTAssertTrue(closeItem.waitToExist(timeout: 5), "File ▸ Close Project should exist")
         closeItem.click()
         XCTAssertTrue(welcome.assertVisible(), "Closing the project should return to the welcome window")

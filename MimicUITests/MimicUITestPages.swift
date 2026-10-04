@@ -449,6 +449,33 @@ struct WorkspacePage {
         return pane.exists ? pane.frame.width + 16 : 0
     }
 
+    /// Whether the inspector is showing once the app has finished presenting or hiding it.
+    ///
+    /// The app brings the inspector in on its own, a beat after what gave it something to show:
+    /// an empty project hides it, and its first endpoint presents it about 0.3 s after the editor
+    /// appears on CI. A test that read `inspector.header` the moment the editor appeared saw no
+    /// inspector, then pressed ⌥⌘I, a toggle, and shut the one the app was opening (the layout
+    /// audit's round trips, run 37190636173), or skipped hiding one that arrived a moment later.
+    /// XCTest's waits used to cover this by never looking before a second had passed; the waits
+    /// that look at once do not, so this waits for the state itself: shown, with its frame still,
+    /// or absent on four readings 0.15 s apart, which is longer than the app takes to present it.
+    @MainActor
+    @discardableResult
+    func settledInspectorIsShown(timeout: TimeInterval = 3) -> Bool {
+        let header = app.descendants(matching: .any).matching(identifier: "inspector.header").firstMatch
+        var last: Bool?
+        var agreeing = 0
+        _ = UITestApp.waitUntil(timeout: timeout, pollInterval: 0.15) {
+            let shown = header.exists
+            agreeing = shown == last ? agreeing + 1 : 0
+            last = shown
+            return shown || agreeing >= 4
+        }
+        guard header.exists else { return false }
+        UITestApp.waitForStableFrame(header)
+        return true
+    }
+
     /// Fills the window and, when the display alone cannot give the centre column the toolbar's
     /// expanded breakpoint, hides the inspector and then the navigator until it does.
     ///
@@ -460,7 +487,8 @@ struct WorkspacePage {
         fillWindow()
         guard overflowMenu.exists else { return false }
         let inspectorHeader = app.descendants(matching: .any).matching(identifier: "inspector.header").firstMatch
-        if inspectorHeader.exists {
+        // Decided on the inspector the app settles on, not the one on screen this instant.
+        if settledInspectorIsShown() {
             app.typeKey("i", modifierFlags: [.command, .option])
             _ = inspectorHeader.waitToDisappear(timeout: 5)
         }
@@ -479,8 +507,11 @@ struct WorkspacePage {
         if UITestApp.waitUntil(timeout: 2, pollInterval: 0.1, { hide.exists && hide.isHittable }) {
             hide.click()
         } else {
-            app.menuBars.menuBarItems["View"].click()
+            let viewMenu = app.menuBars.menuBarItems["View"]
             let item = app.menuItems["Hide Sidebar"].firstMatch
+            // Hittable, not merely present: a menu bar's items are in the tree while their menu is
+            // closed. Not asserted: the shortcut below is the fallback when the menu offers nothing.
+            UITestApp.click(viewMenu, expecting: { item.exists && item.isHittable })
             if item.waitToExist(timeout: 2) {
                 item.click()
             } else {
@@ -1089,6 +1120,13 @@ struct InspectorPage {
     /// A scenario row. Clicking it OPENS the scenario in the editor; it does not make it live.
     /// Its value still reports the live state ("active"/"inactive"); its selected trait marks the
     /// row being edited.
+    ///
+    /// Identifier only, and resolved when it is used, so a `waitToExist` on it waits for the row.
+    /// There is nothing to fall back to: `ScenarioRow` makes the row one element
+    /// (`children: .ignore`), so its name is never a static text of its own. A `findScenario` that
+    /// looked for the row once and otherwise returned `staticTexts[name]` left two tests waiting on
+    /// an element that cannot exist whenever the row arrived a moment after the endpoint was created
+    /// (run 37190636173).
     func scenarioRow(named name: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: "inspector.scenario.\(name)").firstMatch
     }
@@ -1103,14 +1141,13 @@ struct InspectorPage {
         let radio = liveRadio(named: name)
         XCTAssertTrue(radio.waitToExist(timeout: 5), "\(name) should offer a live radio",
                       file: file, line: line)
-        radio.click()
-    }
-
-    /// Finds scenario row by looking for the text content as fallback.
-    func findScenario(named name: String) -> XCUIElement {
-        let byId = scenarioRow(named: name)
-        if byId.exists { return byId }
-        return app.staticTexts[name].firstMatch
+        // Through `UITestApp.click`: a row that has just been added (a duplicate, say) is still
+        // sliding into place, and its radio read as not hittable when clicked at once. Checked by
+        // the row's own live value; making a scenario live is idempotent, so a second click cannot
+        // undo the first.
+        XCTAssertTrue(UITestApp.click(radio, expecting: { self.isScenarioActive(named: name) }),
+                      "Clicking \(name)'s radio should make it live — \(UITestApp.describe(radio))",
+                      file: file, line: line)
     }
 
     /// Whether the row is the one open in the editor (its selected trait), as distinct from live.
