@@ -113,4 +113,6 @@ UI tests must use an isolated `MIMIC_DEFAULTS_SUITE` and test-owned database pat
 
 Update `MARKETING_VERSION` in `Project.swift` and `ControlAPI.releaseVersion` in `Sources/Domain/Control/ControlResult.swift` together. `ControlAPI.version` changes only for a breaking control API change. Regenerate the workspace after the version bump, run `./Scripts/ci.sh`, and require the full CI gates before release. Use `Scripts/package_release.sh` with the signing and notarization settings described in its header.
 
+Before publishing, run the [release regression gate](docs/RELEASE_REGRESSION.md) against the signed build and attach its recordings to the GitHub release. A failed core scenario keeps the release a draft.
+
 Only a signed, notarized, stapled installer that passes Gatekeeper assessment is copied to `.artifacts/release` for publication. Unsigned or signed-only development packages remain under `.artifacts/package`; missing or failed requested signing is an error. A passing build or fixture-based update test does not prove real installer acceptance. Record user-visible changes in [CHANGELOG.md](CHANGELOG.md).

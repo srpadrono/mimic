@@ -104,6 +104,11 @@ step "Build (Release)"
 # place at build time for notarisation to accept the result, and re-signing a built bundle with a
 # different identity is where this usually goes wrong.
 DERIVED="$BUILD_DIR/DerivedData"
+# Tuist gives SwiftPM resource bundles (swift-crypto, swift-nio) a macOS 10.13 minimum, which Xcode
+# 27 refuses to build. The app's own floor applies to every target instead; nothing in the installer
+# runs below it.
+DEPLOYMENT_TARGET="$(grep -m1 '"MACOSX_DEPLOYMENT_TARGET"' Project.swift | sed -E 's/.*: *"([^"]+)".*/\1/')"
+[[ -n "$DEPLOYMENT_TARGET" ]] || fail "could not read MACOSX_DEPLOYMENT_TARGET from Project.swift"
 for scheme in Mimic MimicCLI; do
   printf '  %s…\n' "$scheme"
   if [[ -n "$SIGN_APP" ]]; then
@@ -123,12 +128,13 @@ for scheme in Mimic MimicCLI; do
       CODE_SIGN_IDENTITY="$SIGN_APP" CODE_SIGN_STYLE=Manual \
       CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
       OTHER_CODE_SIGN_FLAGS="--timestamp --options runtime" \
+      MACOSX_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET" \
       build > "$BUILD_DIR/$scheme.log" 2>&1 \
       || { tail -30 "$BUILD_DIR/$scheme.log"; fail "$scheme failed to build"; }
   else
     xcodebuild -workspace Mimic.xcworkspace -scheme "$scheme" \
       -configuration Release -derivedDataPath "$DERIVED" \
-      CODE_SIGN_IDENTITY=- build > "$BUILD_DIR/$scheme.log" 2>&1 \
+      CODE_SIGN_IDENTITY=- MACOSX_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET" build > "$BUILD_DIR/$scheme.log" 2>&1 \
       || { tail -30 "$BUILD_DIR/$scheme.log"; fail "$scheme failed to build"; }
   fi
 done

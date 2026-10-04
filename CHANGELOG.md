@@ -5,6 +5,8 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-10-04
+
 ### Added
 
 - Open a `mimic project export` document from the welcome window or File ▸ Open Project Export…
@@ -38,26 +40,6 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The journey step sheet is laid out as designed, and its status field has a menu of common codes.
 - Code editors no longer highlight the current line.
 
-## [0.13.0] — 2026-09-26
-
-### Added
-
-- Organize journeys into saved groups in the navigator, editor, or CLI with
-  `journey create/update --group`.
-
-### Improved
-
-- Give Endpoints and Journeys consistent native navigation, independent filters, grouped rows,
-  and a shortcut to the active journey. Filter menus show the selected scope; clearing a filter
-  keeps typing focus.
-- Keep project identity, Run/Stop, and panel controls reachable in compact windows. Import and
-  Server Settings stay together, and listener details show named ports and pending restarts.
-  Controls and inspectors share sizing, spacing, disabled states, and Reduce Motion behavior.
-- Preview imported response bodies and explain unavailable, binary, oversized, partial, or invalid
-  entries before saving. Usable captures are selected ahead of earlier unusable responses.
-- Disclose truncated traffic bodies and prevent copying an incomplete request as a complete cURL
-  command. Request details and editing forms remain usable in shorter windows.
-
 ### Fixed
 
 - The window keeps a usable minimum width with the inspector hidden or a request open. It could
@@ -82,6 +64,28 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - In a window too narrow for the inspector beside a hidden navigator, the inspector steps aside
   until the window widens, so the toolbar keeps the project name instead of hiding it behind
   AppKit's overflow chevron.
+## [0.13.0] — 2026-09-26
+
+### Added
+
+- Organize journeys into saved groups in the navigator, editor, or CLI with
+  `journey create/update --group`.
+
+### Improved
+
+- Give Endpoints and Journeys consistent native navigation, independent filters, grouped rows,
+  and a shortcut to the active journey. Filter menus show the selected scope; clearing a filter
+  keeps typing focus.
+- Keep project identity, Run/Stop, and panel controls reachable in compact windows. Import and
+  Server Settings stay together, and listener details show named ports and pending restarts.
+  Controls and inspectors share sizing, spacing, disabled states, and Reduce Motion behavior.
+- Preview imported response bodies and explain unavailable, binary, oversized, partial, or invalid
+  entries before saving. Usable captures are selected ahead of earlier unusable responses.
+- Disclose truncated traffic bodies and prevent copying an incomplete request as a complete cURL
+  command. Request details and editing forms remain usable in shorter windows.
+
+### Fixed
+
 - Preserve Unicode text, selection, and Undo/Redo when formatting response bodies. Clearing a body
   persists, switching scenarios resets document undo, and remote updates refresh clean fields while
   preserving local drafts.
@@ -600,6 +604,7 @@ Ships as a signed and notarised installer that puts Mimic.app in `/Applications`
 Beta, and versioned below 1.0 deliberately: the interface and the stored project format may still
 change between releases.
 
+[0.14.0]: https://github.com/srpadrono/mimic/releases/tag/v0.14.0
 [0.13.0]: https://github.com/srpadrono/mimic/releases/tag/v0.13.0
 [0.11.0]: https://github.com/srpadrono/mimic/releases/tag/v0.11.0
 [0.10.0]: https://github.com/srpadrono/mimic/releases/tag/v0.10.0
