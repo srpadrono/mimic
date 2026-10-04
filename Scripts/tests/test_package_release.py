@@ -74,7 +74,8 @@ class PackageReleaseTests(unittest.TestCase):
         source = Path(__file__).resolve().parents[1] / 'package_release.sh'
         self.script = scripts / source.name
         shutil.copyfile(source, self.script)
-        (self.root / 'Project.swift').write_text('"MARKETING_VERSION": "0.12.0"\n')
+        (self.root / 'Project.swift').write_text(
+            '"MACOSX_DEPLOYMENT_TARGET": "26.0",\n"MARKETING_VERSION": "0.12.0"\n')
         domain = self.root / 'Sources/Domain/Control'
         domain.mkdir(parents=True)
         (domain / 'ControlResult.swift').write_text('static let releaseVersion = "0.12.0"\n')
@@ -118,6 +119,14 @@ class PackageReleaseTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse(self.release.exists())
         self.assertTrue(any(call[0] == 'productsign' for call in self.calls()))
+
+    def test_every_build_uses_the_app_deployment_target(self):
+        result = self.run_package()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        builds = [call for call in self.calls() if call[0] == 'xcodebuild']
+        self.assertTrue(builds)
+        for call in builds:
+            self.assertIn('MACOSX_DEPLOYMENT_TARGET=26.0', call)
 
     def test_incomplete_signing_fails_before_build(self):
         result = self.run_package(MIMIC_SIGN_APP='fixture app identity')
