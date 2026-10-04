@@ -50,7 +50,9 @@ struct JourneysNavigatorPage {
     /// of "Active" and "Selected" it reads.
     var activeBadge: XCUIElement { app.buttons["journeyRun.deactivateButton"] }
     var addStepButton: XCUIElement { app.buttons["journeyEditor.addStepButton"] }
-    var stepList: XCUIElement { app.tables["journeyEditor.stepList"].firstMatch }
+    /// The editor's one list, the overview row and then the steps. A SwiftUI `List` realizes as an
+    /// outline on macOS, so `app.tables` never matched it.
+    var stepList: XCUIElement { app.outlines["journeyEditor.stepList"].firstMatch }
 
     var activateButton: XCUIElement { app.buttons["journeyRun.activateButton"] }
     var deactivateButton: XCUIElement { app.buttons["journeyRun.deactivateButton"] }
@@ -58,8 +60,10 @@ struct JourneysNavigatorPage {
     var advanceButton: XCUIElement { app.buttons["journeyRun.advanceButton"] }
     var progressLabel: XCUIElement { app.staticTexts["journeyRun.progress"] }
 
+    /// Searched inside the navigator's pane rather than the whole window: the rows are always its,
+    /// and a `BEGINSWITH` over every element of `app` is the query shape that has timed XCUITest out.
     func journeyRow(named name: String) -> XCUIElement {
-        app.descendants(matching: .any)
+        app.container(named: "sidebar").descendants(matching: .any)
             .matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@",
                                   "journeys.row.", "\(name), "))
             .firstMatch
@@ -145,7 +149,12 @@ final class JourneyUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        UserDefaults(suiteName: Self.testSuite)?.removePersistentDomain(forName: Self.testSuite)
+        // The display check every `MimicUITestCase` makes, which this suite, written before that
+        // base class, would otherwise miss. XCTest calls this on the main thread.
+        MainActor.assumeIsolated { UITestEnvironment.failUnlessDisplayFitsPinnedScreen() }
+        // No reset of `testSuite` from here, for the reason `MimicUITestCase.setUpWithError` gives:
+        // the runner is not sandboxed and the app is, so the runner's removal reached a file nothing
+        // reads. The app clears its own copy at launch.
     }
 
     override func tearDownWithError() throws {
@@ -188,12 +197,13 @@ final class JourneyUITests: XCTestCase {
         stepSheet = JourneyStepSheetPage(app: application)
 
         XCTAssertTrue(
-            UITestApp.launchAndBringToForeground(app) { self.welcome.assertVisible(timeout: 1) },
+            // A timeout of 0 looks once: the launch loop does the polling.
+            UITestApp.launchAndBringToForeground(app) { self.welcome.assertVisible(timeout: 0) },
             "Welcome screen should appear once the app is frontmost"
         )
 
         welcome.newProjectButton.click()
-        XCTAssertTrue(newProjectSheet.nameField.waitForExistence(timeout: 5))
+        XCTAssertTrue(newProjectSheet.nameField.waitToExist(timeout: 5))
         newProjectSheet.nameField.click()
         newProjectSheet.nameField.typeText(name)
         newProjectSheet.createButton.click()
@@ -208,14 +218,15 @@ final class JourneyUITests: XCTestCase {
     @MainActor
     private func showJourneysNavigator() {
         let menuBar = app.menuBars.firstMatch
-        XCTAssertTrue(menuBar.waitForExistence(timeout: 5), "Menu bar should exist")
+        XCTAssertTrue(menuBar.waitToExist(timeout: 5), "Menu bar should exist")
 
         let journeysMenu = menuBar.menuBarItems["Journeys"]
-        XCTAssertTrue(journeysMenu.waitForExistence(timeout: 5), "Journeys menu should exist")
-        journeysMenu.click()
-
+        XCTAssertTrue(journeysMenu.waitToExist(timeout: 5), "Journeys menu should exist")
         let showItem = app.menuItems["Show Journeys"]
-        XCTAssertTrue(showItem.waitForExistence(timeout: 5), "Show Journeys item should exist")
+        // Hittable, not merely present: a menu bar's items are in the tree while their menu is closed.
+        XCTAssertTrue(UITestApp.click(journeysMenu, expecting: { showItem.exists && showItem.isHittable }),
+                      "Journeys menu should open — \(UITestApp.describe(journeysMenu))")
+        XCTAssertTrue(showItem.waitToExist(timeout: 5), "Show Journeys item should exist")
         showItem.click()
 
         XCTAssertTrue(journeys.waitUntilVisible(), "Journeys navigator should appear in the sidebar")
@@ -235,7 +246,7 @@ final class JourneyUITests: XCTestCase {
                     let cancel = self.newJourneySheet.cancelButton
                     if cancel.exists {
                         cancel.click()
-                        _ = cancel.waitForNonExistence(timeout: 3)
+                        _ = cancel.waitToDisappear(timeout: 3)
                     }
                 }
             ),
@@ -243,18 +254,53 @@ final class JourneyUITests: XCTestCase {
         )
 
         let row = templatePicker.template(id)
-        XCTAssertTrue(row.waitForExistence(timeout: 5), "The requested template should be listed")
+        XCTAssertTrue(row.waitToExist(timeout: 5), "The requested template should be listed")
         row.click()
 
         // The toggle defaults to on; only click when the caller wants the other state.
-        XCTAssertTrue(templatePicker.activateToggle.waitForExistence(timeout: 5))
+        XCTAssertTrue(templatePicker.activateToggle.waitToExist(timeout: 5))
         XCTAssertEqual(templatePicker.activateToggle.value as? Int, 1)
         if !activate {
             templatePicker.activateToggle.click()
             XCTAssertEqual(templatePicker.activateToggle.value as? Int, 0)
         }
         templatePicker.addButton.click()
-        XCTAssertTrue(templatePicker.addButton.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(templatePicker.addButton.waitToDisappear(timeout: 5))
+    }
+
+    /// Opens the new-journey sheet from the navigator's add menu, with the retrying helper
+    /// `addTemplate` uses for the same menu's other item. A click the moving menu sends to "Add
+    /// journey from template" opens the template picker instead, which is closed before the menu is
+    /// opened again.
+    @MainActor
+    private func openNewJourneySheet() {
+        XCTAssertTrue(
+            UITestApp.chooseFromSubmenu(
+                in: app,
+                parent: journeys.addButton,
+                item: journeys.newEmptyMenuItem,
+                thenAwait: newJourneySheet.nameField,
+                reopenMenu: {
+                    let cancel = self.templatePicker.cancelButton
+                    if cancel.exists {
+                        cancel.click()
+                        _ = cancel.waitToDisappear(timeout: 3)
+                    }
+                }
+            ),
+            "The add menu should offer an empty journey, and it should open the new journey sheet"
+        )
+    }
+
+    /// Opens the step sheet with the editor's "Add step", once that button is under the pointer and
+    /// still. On CI an always-visible scroll bar once lay across it and took the click; see
+    /// `UITestApp.click(_:expecting:)`.
+    @MainActor
+    private func openStepSheet() {
+        XCTAssertTrue(
+            UITestApp.click(journeys.addStepButton, expecting: { self.stepSheet.pathField.exists }),
+            "Step sheet should open — Add step is \(UITestApp.describe(journeys.addStepButton))"
+        )
     }
 
     // MARK: - Tests
@@ -265,7 +311,7 @@ final class JourneyUITests: XCTestCase {
         showJourneysNavigator()
 
         XCTAssertTrue(
-            journeys.emptyStateHeading.waitForExistence(timeout: 5),
+            journeys.emptyStateHeading.waitToExist(timeout: 5),
             "A project with no journeys should explain what a journey is"
         )
 
@@ -291,7 +337,7 @@ final class JourneyUITests: XCTestCase {
         showJourneysNavigator()
 
         let menu = journeys.addButton
-        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        XCTAssertTrue(menu.waitToExist(timeout: 5))
         XCTAssertTrue(menu.isHittable)
         XCTAssertEqual(menu.elementType, .menuButton)
         UITestApp.assertAccessibleMenuName(menu, equals: "Choose how to add a journey")
@@ -301,8 +347,8 @@ final class JourneyUITests: XCTestCase {
         XCTAssertEqual(journeys.emptyStateAddButton.label, "Add journey")
 
         menu.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).click()
-        XCTAssertTrue(journeys.newEmptyMenuItem.waitForExistence(timeout: 5))
-        XCTAssertTrue(journeys.templateMenuItem.waitForExistence(timeout: 5))
+        XCTAssertTrue(journeys.newEmptyMenuItem.waitToExist(timeout: 5))
+        XCTAssertTrue(journeys.templateMenuItem.waitToExist(timeout: 5))
         XCTAssertEqual(journeys.newEmptyMenuItem.title, "New empty journey")
         XCTAssertEqual(journeys.templateMenuItem.title, "Add journey from template")
         let menuEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -322,7 +368,7 @@ final class JourneyUITests: XCTestCase {
 
         let menu = journeys.addButton
         XCTAssertLessThan(app.windows.firstMatch.frame.width, 1180)
-        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        XCTAssertTrue(menu.waitToExist(timeout: 5))
         XCTAssertTrue(menu.isHittable)
         XCTAssertEqual(menu.elementType, .menuButton)
         UITestApp.assertAccessibleMenuName(menu, equals: "Choose how to add a journey")
@@ -331,8 +377,8 @@ final class JourneyUITests: XCTestCase {
         XCTAssertEqual(journeys.emptyStateAddButton.label, "Add journey")
 
         menu.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).click()
-        XCTAssertTrue(journeys.newEmptyMenuItem.waitForExistence(timeout: 5))
-        XCTAssertTrue(journeys.templateMenuItem.waitForExistence(timeout: 5))
+        XCTAssertTrue(journeys.newEmptyMenuItem.waitToExist(timeout: 5))
+        XCTAssertTrue(journeys.templateMenuItem.waitToExist(timeout: 5))
         let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         evidence.name = "compact-journey-add-menu-light"
         evidence.lifetime = .keepAlways
@@ -347,17 +393,17 @@ final class JourneyUITests: XCTestCase {
         addTemplate("retry-after-failure", activate: false)
 
         XCTAssertTrue(
-            journeys.editorName.waitForExistence(timeout: 10),
+            journeys.editorName.waitToExist(timeout: 10),
             "The new journey should be selected and shown"
         )
-        XCTAssertTrue(journeys.addStepButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(journeys.addStepButton.waitToExist(timeout: 5))
 
         // Literal routes and outcomes distinguish order from the presence of four rows.
         let expected = [("/login", "responds 200"), ("/account-summary", "responds 500"),
                         ("/inbox", "responds 200"), ("/account-summary", "responds 200")]
         for (index, step) in expected.enumerated() {
             XCTAssertTrue(
-                journeys.step(at: index).waitForExistence(timeout: 5),
+                journeys.step(at: index).waitToExist(timeout: 5),
                 "Step \(index) should be listed"
             )
             XCTAssertTrue(journeys.step(at: index).label.contains(step.0))
@@ -371,7 +417,7 @@ final class JourneyUITests: XCTestCase {
         showJourneysNavigator()
         addTemplate("retry-after-failure", activate: false)
 
-        XCTAssertTrue(journeys.activateButton.waitForExistence(timeout: 10), "Activate should be offered")
+        XCTAssertTrue(journeys.activateButton.waitToExist(timeout: 10), "Activate should be offered")
         // An inactive journey offers Activate in the run controls' slot, and nothing else.
         XCTAssertFalse(journeys.restartButton.exists, "Restart is meaningless before activation")
 
@@ -382,10 +428,10 @@ final class JourneyUITests: XCTestCase {
         // *result* of an action than for the affordance that triggers it (10s, on the line above)
         // was the imbalance that made this the one journey test that failed under load.
         XCTAssertTrue(
-            journeys.deactivateButton.waitForExistence(timeout: 10),
+            journeys.deactivateButton.waitToExist(timeout: 10),
             "Activating should offer to deactivate"
         )
-        XCTAssertTrue(journeys.activeBadge.waitForExistence(timeout: 10), "The journey should read as active")
+        XCTAssertTrue(journeys.activeBadge.waitToExist(timeout: 10), "The journey should read as active")
         XCTAssertTrue(journeys.restartButton.isEnabled, "Restart should now be available")
         XCTAssertTrue(journeys.advanceButton.isEnabled, "Advance should now be available")
     }
@@ -396,14 +442,14 @@ final class JourneyUITests: XCTestCase {
         showJourneysNavigator()
         addTemplate("retry-after-failure", activate: true)
 
-        XCTAssertTrue(journeys.deactivateButton.waitForExistence(timeout: 10), "Should start active")
+        XCTAssertTrue(journeys.deactivateButton.waitToExist(timeout: 10), "Should start active")
         journeys.deactivateButton.click()
 
         XCTAssertTrue(
-            journeys.activateButton.waitForExistence(timeout: 5),
+            journeys.activateButton.waitToExist(timeout: 5),
             "Deactivating should offer to activate again"
         )
-        XCTAssertTrue(journeys.restartButton.waitForNonExistence(timeout: 5),
+        XCTAssertTrue(journeys.restartButton.waitToDisappear(timeout: 5),
                       "Run controls should give way to Activate again")
     }
 
@@ -412,19 +458,13 @@ final class JourneyUITests: XCTestCase {
         launchWithProject()
         showJourneysNavigator()
 
-        journeys.addButton.click()
-        XCTAssertTrue(journeys.newEmptyMenuItem.waitForExistence(timeout: 5))
-        journeys.newEmptyMenuItem.click()
-
-        XCTAssertTrue(newJourneySheet.nameField.waitForExistence(timeout: 5), "New journey sheet should open")
+        openNewJourneySheet()
         newJourneySheet.nameField.click()
         newJourneySheet.nameField.typeText("Hand written")
         newJourneySheet.createButton.click()
 
-        XCTAssertTrue(journeys.addStepButton.waitForExistence(timeout: 10), "Editor should appear")
-        journeys.addStepButton.click()
-
-        XCTAssertTrue(stepSheet.pathField.waitForExistence(timeout: 5), "Step sheet should open")
+        XCTAssertTrue(journeys.addStepButton.waitToExist(timeout: 10), "Editor should appear")
+        openStepSheet()
         stepSheet.pathField.click()
         stepSheet.pathField.typeText("/account-summary")
         stepSheet.statusField.click()
@@ -433,7 +473,7 @@ final class JourneyUITests: XCTestCase {
         stepSheet.saveButton.click()
 
         XCTAssertTrue(
-            journeys.step(at: 0).waitForExistence(timeout: 5),
+            journeys.step(at: 0).waitToExist(timeout: 5),
             "The new step should appear in the sequence"
         )
     }
@@ -443,24 +483,20 @@ final class JourneyUITests: XCTestCase {
         launchWithProject()
         showJourneysNavigator()
 
-        journeys.addButton.click()
-        XCTAssertTrue(journeys.newEmptyMenuItem.waitForExistence(timeout: 5))
-        journeys.newEmptyMenuItem.click()
-        XCTAssertTrue(newJourneySheet.nameField.waitForExistence(timeout: 5))
+        openNewJourneySheet()
         newJourneySheet.nameField.click()
         newJourneySheet.nameField.typeText("Validation")
         newJourneySheet.createButton.click()
 
-        XCTAssertTrue(journeys.addStepButton.waitForExistence(timeout: 10))
-        journeys.addStepButton.click()
-        XCTAssertTrue(stepSheet.pathField.waitForExistence(timeout: 5))
+        XCTAssertTrue(journeys.addStepButton.waitToExist(timeout: 10))
+        openStepSheet()
 
         stepSheet.pathField.click()
         stepSheet.pathField.typeText("no-leading-slash")
         stepSheet.saveButton.click()
 
         XCTAssertTrue(
-            stepSheet.validationMessage.waitForExistence(timeout: 5),
+            stepSheet.validationMessage.waitToExist(timeout: 5),
             "An invalid path should be explained rather than silently accepted"
         )
         XCTAssertTrue(stepSheet.pathField.exists, "The sheet should stay open so the path can be fixed")
@@ -471,7 +507,7 @@ final class JourneyUITests: XCTestCase {
         launchWithProject()
         showJourneysNavigator()
         addTemplate("payment-retry", activate: false)
-        XCTAssertTrue(journeys.editorName.waitForExistence(timeout: 10))
+        XCTAssertTrue(journeys.editorName.waitToExist(timeout: 10))
 
         // ⌘W used to close the journeys *window*, so this test only ever proved a window could be
         // reopened. With one home for journeys it closes the project, which makes the assertion the
@@ -481,9 +517,12 @@ final class JourneyUITests: XCTestCase {
         // reach the journeys window and close *that*. And not the "Close" item beside it, which is
         // the same AppKit command — "Close Project" is the app's own, and it is the one that returns
         // you to the welcome window rather than disposing of the window you are in.
-        app.menuBars.firstMatch.menuBarItems["File"].click()
+        let fileMenu = app.menuBars.firstMatch.menuBarItems["File"]
         let closeItem = app.menuItems["Close Project"]
-        XCTAssertTrue(closeItem.waitForExistence(timeout: 5), "File ▸ Close Project should exist")
+        // Hittable, not merely present: a menu bar's items are in the tree while their menu is closed.
+        XCTAssertTrue(UITestApp.click(fileMenu, expecting: { closeItem.exists && closeItem.isHittable }),
+                      "The File menu should open — \(UITestApp.describe(fileMenu))")
+        XCTAssertTrue(closeItem.waitToExist(timeout: 5), "File ▸ Close Project should exist")
         closeItem.click()
         XCTAssertTrue(welcome.assertVisible(), "Closing the project should return to the welcome window")
 
@@ -502,7 +541,7 @@ final class JourneyUITests: XCTestCase {
         // has to be clicked before the editor shows it.
         journeys.journeyRow(named: "Payment succeeds on retry").click()
         XCTAssertTrue(
-            journeys.editorName.waitForExistence(timeout: 10),
+            journeys.editorName.waitToExist(timeout: 10),
             "The journey should still be there after the project is closed and reopened"
         )
     }

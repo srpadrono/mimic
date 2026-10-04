@@ -59,10 +59,57 @@ struct WorkspaceToolbarLayoutTests {
             windowWidth: 900, inspectorWidth: 300, isNavigatorHidden: true),
                 "The compact 900pt window keeps the inspector with the navigator hidden")
         #expect(WorkspaceToolbarLayout.leavesRoomForInspector(
-            windowWidth: 616, inspectorWidth: 300, isNavigatorHidden: false),
+            windowWidth: 900, inspectorWidth: 300, isNavigatorHidden: false),
                 "With the navigator showing, the window's controls sit over it, not the centre column")
         #expect(WorkspaceToolbarLayout.leavesRoomForInspector(
             windowWidth: .infinity, inspectorWidth: 300, isNavigatorHidden: true),
                 "Before the first measurement nothing is taken away")
     }
+
+    @Test("The inspector gives way beside the navigator when the editor would lose its room")
+    func inspectorGivesWayBesideTheNavigator() {
+        // The navigator can give up all but 220pt; the editor keeps 320pt; the inspector takes 300.
+        #expect(WorkspaceToolbarLayout.leavesRoomForInspector(windowWidth: 840, inspectorWidth: 300, isNavigatorHidden: false))
+        #expect(!WorkspaceToolbarLayout.leavesRoomForInspector(windowWidth: 839, inspectorWidth: 300, isNavigatorHidden: false))
+        // The window's floor, 680pt: an inspector there would push the navigator off the window.
+        #expect(!WorkspaceToolbarLayout.leavesRoomForInspector(windowWidth: 680, inspectorWidth: 300, isNavigatorHidden: false))
+        // A wider inspector needs a wider window.
+        #expect(!WorkspaceToolbarLayout.leavesRoomForInspector(windowWidth: 1000, inspectorWidth: 480, isNavigatorHidden: false))
+        #expect(WorkspaceToolbarLayout.leavesRoomForInspector(windowWidth: 1020, inspectorWidth: 480, isNavigatorHidden: false))
+    }
+
+    @Test("The window keeps room for the editor and a toolbar that fits")
+    func windowMinimum() {
+        // Beside a navigator at its widest, 360pt, the detail column keeps its 320pt.
+        #expect(WorkspaceToolbarLayout.minimumWindowWidth == 680)
+        // Without the navigator, the traffic lights and the sidebar button sit over the column and
+        // the minimal tier still has its 360pt beside them.
+        #expect(WorkspaceToolbarLayout.minimumWindowWidth - WorkspaceToolbarLayout.leadingWindowChrome
+                >= WorkspaceToolbarLayout.minimalCenterWidth)
+        // The compact 900pt window still holds all three panels at their ideal widths.
+        #expect(264 + WorkspaceToolbarLayout.minimumDetailWidthBesideNavigator + 300 <= 900)
+    }
+
+    @Test("The narrow identity fits a short project name whole")
+    func narrowIdentityFitsAShortName() {
+        // "Sample project" in the toolbar's semibold measures 95pt; at 88pt it read "Samp…roject".
+        #expect(WorkspaceToolbarLayout.narrow.projectIdentityMaximumWidth >= 96)
+        #expect(WorkspaceToolbarLayout.minimal.projectIdentityMaximumWidth >= 96)
+    }
+
+    /// The identity and status items are keyed by the stage so AppKit measures new ones when it
+    /// changes. Two stages sharing a key would share an item, and after an animated inspector
+    /// toggle between them the address well spilled over the project name at the old width.
+    @Test("Every toolbar stage keys its width-dependent items apart")
+    func everyStageHasItsOwnItemKey() {
+        let stages: [WorkspaceToolbarLayout] = [.expanded, .compactSummary, .overflow, .narrow, .minimal]
+        let keys = stages.map(\.itemKey)
+        #expect(Set(keys).count == stages.count, "Stages share an item key: \(keys)")
+        #expect(keys.allSatisfy { !$0.isEmpty })
+        // Hiding the inspector in CI's filled 1024pt window, then in the 900pt compact one: the two
+        // toggles the layout audit caught.
+        #expect(WorkspaceToolbarLayout(centerWidth: 444).itemKey != WorkspaceToolbarLayout(centerWidth: 744).itemKey)
+        #expect(WorkspaceToolbarLayout(centerWidth: 326).itemKey != WorkspaceToolbarLayout(centerWidth: 626).itemKey)
+    }
 }
+

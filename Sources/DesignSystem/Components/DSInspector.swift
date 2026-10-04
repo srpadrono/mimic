@@ -9,9 +9,6 @@ public enum DSInspectorMetrics {
     public static let rowInset = DSSpacing.sm
     public static let iconSlot = DSSpacing.lg
     public static let labelColumn = DSLayout.inspectorLabelWidth
-    /// The label beside an editable field, narrower so the field gets the room: the endpoint
-    /// inspector's Group, Base delay, Port and When unmatched.
-    public static let fieldLabelColumn = DSLayout.inspectorFieldLabelWidth
     public static let statusColumn: CGFloat = 36
 }
 

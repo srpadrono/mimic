@@ -38,6 +38,8 @@ public struct NewProjectSheet: View {
     let onConfirm: (String, Int) -> Void
     /// Draws the Name field focused without keyboard focus, for the gallery's off-screen render.
     let showsNameFocus: Bool
+    /// What to say beside the port instead of probing it, for the gallery; `nil` probes.
+    let fixedPortAvailability: Bool?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -58,18 +60,27 @@ public struct NewProjectSheet: View {
 
     /// Opens with the fields already filled, as a preview or the gallery shows it. `showsNameFocus`
     /// draws the Name field's focus ring, as the design does, where no window can hold focus.
+    ///
+    /// The gallery's snapshot has to draw the same pixels on every run, so the gallery holds the
+    /// sheet's two live inputs still. `portAvailability` stands in for the port probe, whose answer
+    /// depends on what the machine drawing the sheet has bound, and which may not have answered by
+    /// the time the frame is taken; either way, what the sheet writes beside the port can change. With
+    /// `showsNameFocus` the sheet asks for no default focus, since the ring is drawn without it:
+    /// real focus could reach the field in the off-screen window or not, depending on timing, and a
+    /// field being edited draws its text through AppKit's field editor instead.
     public init(
         initialProjectName: String,
         initialPortString: String,
         showsNameFocus: Bool = false,
+        portAvailability: Bool? = nil,
         onConfirm: @escaping (String, Int) -> Void
     ) {
         self.onConfirm = onConfirm
         self.showsNameFocus = showsNameFocus
-        _form = State(initialValue: NewProjectFormState(
-            projectName: initialProjectName,
-            portString: initialPortString
-        ))
+        self.fixedPortAvailability = portAvailability
+        let form = NewProjectFormState(projectName: initialProjectName, portString: initialPortString)
+        _form = State(initialValue: form)
+        _portIsAvailable = State(initialValue: form.isPortValid ? portAvailability : nil)
     }
 
     /// The board's 15/20 title line.
@@ -78,6 +89,14 @@ public struct NewProjectSheet: View {
     private static let buttonRowHeight: CGFloat = DSControlHeight.large + 1
 
     public var body: some View {
+        if showsNameFocus {
+            content
+        } else {
+            content.defaultFocus($focusedField, .name)
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: DSSpacing.lg) {
             Text("New project")
                 .font(DSTypography.headline)
@@ -166,11 +185,14 @@ public struct NewProjectSheet: View {
         .frame(width: DSSheetWidth.short)
         .background(DSColors.sheet)
         .dsSheetSurface()
-        .defaultFocus($focusedField, .name)
         // Re-probed as the port is typed, after a pause so each keystroke is not a bind.
         .task(id: form.portString) {
             guard form.isPortValid, let port = form.portValue else {
                 portIsAvailable = nil
+                return
+            }
+            if let fixedPortAvailability {
+                portIsAvailable = fixedPortAvailability
                 return
             }
             if portIsAvailable != nil {

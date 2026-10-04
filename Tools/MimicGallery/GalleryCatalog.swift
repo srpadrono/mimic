@@ -318,8 +318,10 @@ enum GalleryCatalog {
         },
         GalleryEntry("projects.newProjectSheet", "New project sheet", group: .projects,
                      size: CGSize(width: 377, height: 227)) {
+            // Fixed rather than probed: a probe makes the snapshot depend on what the machine drawing
+            // it has bound, and on whether the probe answered before the frame was taken.
             NewProjectSheet(initialProjectName: DesignFixtures.projectName, initialPortString: "8080",
-                            showsNameFocus: true) { _, _ in }
+                            showsNameFocus: true, portAvailability: true) { _, _ in }
         },
     ]
 

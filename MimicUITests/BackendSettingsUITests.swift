@@ -6,7 +6,14 @@ import XCTest
 @MainActor
 struct BackendSettingsPage {
     let app: XCUIApplication
-    var open: XCUIElement { WorkspacePage(app: app).toolbarAction("backend.settingsButton") }
+    /// The toolbar's Server settings button, inline or as an item of "More actions", which this opens
+    /// when it has to (`WorkspacePage.revealToolbarAction(_:titled:)`). A function because it can
+    /// click: as a property it opened the menu on every read.
+    func revealSettingsButton() -> XCUIElement {
+        WorkspacePage(app: app).revealToolbarAction(
+            "backend.settingsButton", titled: ["Server settings", "Server settings\u{2026}"]
+        )
+    }
     var captureHelp: XCUIElement { app.staticTexts["backend.primary.captureHelp"].firstMatch }
     var primaryName: XCUIElement { app.textFields["backend.primary.name"].firstMatch }
     var primaryPort: XCUIElement { app.textFields["backend.primary.port"].firstMatch }
@@ -104,9 +111,10 @@ final class BackendSettingsUITests: MimicUITestCase {
         launchApp()
         createProjectViaUI(name: "Two backends")
         let page = BackendSettingsPage(app: app)
-        XCTAssertTrue(page.open.waitForExistence(timeout: 5))
-        page.open.click()
-        XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
+        let settingsButton = page.revealSettingsButton()
+        XCTAssertTrue(settingsButton.waitToExist(timeout: 5))
+        settingsButton.click()
+        XCTAssertTrue(page.primaryName.waitToExist(timeout: 5))
         XCTAssertTrue(app.staticTexts["http://localhost:8080"].exists,
                       "The displayed URL must use the literal port without grouping separators")
         XCTAssertFalse(page.primaryUpstream.exists, "Pass-through fields should stay hidden until enabled")
@@ -116,13 +124,13 @@ final class BackendSettingsUITests: MimicUITestCase {
         page.primaryEnabled.click()
         page.replace(page.primaryUpstream, with: "https://catalog.example.com/api")
         page.primaryCapture.click()
-        XCTAssertTrue(page.captureHelp.waitForExistence(timeout: 5))
+        XCTAssertTrue(page.captureHelp.waitToExist(timeout: 5))
         let captureHelp = "\(page.captureHelp.label) \(page.captureHelp.value as? String ?? "")"
         XCTAssertTrue(captureHelp.contains("5 MiB"), captureHelp)
         XCTAssertTrue(captureHelp.contains("64 KiB"), captureHelp)
         page.add.click()
         XCTAssertTrue(
-            page.additional("name").waitForExistence(timeout: 5),
+            page.additional("name").waitToExist(timeout: 5),
             "Added backend detail is absent after selection: \(app.debugDescription)"
         )
         XCTAssertTrue(page.apply.isHittable, "The action row must stay on-screen when the form grows")
@@ -133,16 +141,16 @@ final class BackendSettingsUITests: MimicUITestCase {
         page.replace(page.additional("name"), with: "Accounts")
         page.replace(page.additional("port"), with: "8080")
         page.apply.click()
-        XCTAssertTrue(page.additionalPortError.waitForExistence(timeout: 5))
+        XCTAssertTrue(page.additionalPortError.waitToExist(timeout: 5))
         page.replace(page.additional("port"), with: "18081")
         page.apply.click()
-        XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(page.ports.waitForExistence(timeout: 5))
+        XCTAssertTrue(page.apply.waitToDisappear(timeout: 5))
+        XCTAssertTrue(page.ports.waitToExist(timeout: 5))
         XCTAssertTrue(page.portsDescription.contains("2 ports configured"), "\(page.portsDescription)\n\(app.debugDescription)")
         XCTAssertTrue(page.portsDescription.contains("Accounts: 18081"))
         app.activate()
         page.ports.click()
-        XCTAssertTrue(page.portMenuItem(18081).waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(page.portMenuItem(18081).waitToExist(timeout: 5), app.debugDescription)
         // The popover lists the address as the design draws it, without the scheme.
         XCTAssertEqual(page.portMenuItem(18081).value as? String, "localhost:18081")
         let portListShot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
@@ -154,10 +162,10 @@ final class BackendSettingsUITests: MimicUITestCase {
         toolbarShot.name = "Toolbar — two configured ports"
         toolbarShot.lifetime = .keepAlways
         add(toolbarShot)
-        page.open.click()
-        XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
+        page.revealSettingsButton().click()
+        XCTAssertTrue(page.primaryName.waitToExist(timeout: 5))
         XCTAssertEqual(page.primaryName.value as? String, "Catalog")
-        XCTAssertTrue(page.additionalSelection.waitForExistence(timeout: 5))
+        XCTAssertTrue(page.additionalSelection.waitToExist(timeout: 5))
         page.additionalSelection.click()
         XCTAssertEqual(page.additional("port").value as? String, "18081")
         let screenshot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
@@ -165,7 +173,7 @@ final class BackendSettingsUITests: MimicUITestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
         page.primarySelection.click()
-        XCTAssertTrue(page.primaryUpstream.waitForExistence(timeout: 5))
+        XCTAssertTrue(page.primaryUpstream.waitToExist(timeout: 5))
         let passthroughScreenshot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
         passthroughScreenshot.name = "Backend settings — pass-through and capture"
         passthroughScreenshot.lifetime = .keepAlways
@@ -179,23 +187,24 @@ final class BackendSettingsUITests: MimicUITestCase {
         createProjectViaUI(name: "Backend selection")
         workspace.fillWindow()
         let page = BackendSettingsPage(app: app)
-        XCTAssertTrue(page.open.waitForExistence(timeout: 5))
-        page.open.click()
-        XCTAssertTrue(page.primarySelection.waitForExistence(timeout: 5))
+        let settingsButton = page.revealSettingsButton()
+        XCTAssertTrue(settingsButton.waitToExist(timeout: 5))
+        settingsButton.click()
+        XCTAssertTrue(page.primarySelection.waitToExist(timeout: 5))
         page.add.click()
-        XCTAssertTrue(page.additional("name").waitForExistence(timeout: 5))
+        XCTAssertTrue(page.additional("name").waitToExist(timeout: 5))
         page.replace(page.additional("name"), with: "Accounts")
         page.primarySelection.click()
-        XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
+        XCTAssertTrue(page.primaryName.waitToExist(timeout: 5))
         XCTAssertFalse(page.additional("name").exists, "Only the selected listener's fields should be shown")
         page.additionalSelection.click()
         XCTAssertEqual(page.additional("name").value as? String, "Accounts")
         XCTAssertTrue(page.removeSelected.isEnabled)
         page.removeSelected.click()
         XCTAssertFalse(page.additionalSelection.exists)
-        XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
+        XCTAssertTrue(page.primaryName.waitToExist(timeout: 5))
         page.apply.click()
-        XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(page.apply.waitToDisappear(timeout: 5))
         XCTAssertFalse(page.portsDescription.contains("2 ports configured"))
     }
 
@@ -204,21 +213,22 @@ final class BackendSettingsUITests: MimicUITestCase {
         launchApp()
         createProjectViaUI(name: "Port availability")
         let page = BackendSettingsPage(app: app)
-        XCTAssertTrue(page.open.waitForExistence(timeout: 5))
-        page.open.click()
-        XCTAssertTrue(page.primaryAvailability.waitForExistence(timeout: 5),
+        let settingsButton = page.revealSettingsButton()
+        XCTAssertTrue(settingsButton.waitToExist(timeout: 5))
+        settingsButton.click()
+        XCTAssertTrue(page.primaryAvailability.waitToExist(timeout: 5),
                       "A stopped server's port row should say whether its port is free")
         // Whether 8080 is free depends on the machine; a port another listener here claims does not.
         XCTAssertNotNil(page.availability(of: page.primaryAvailability),
                         "The row should say Available or In use — label \(page.primaryAvailability.label)")
         page.add.click()
-        XCTAssertTrue(page.additional("port").waitForExistence(timeout: 5))
+        XCTAssertTrue(page.additional("port").waitToExist(timeout: 5))
         page.replace(page.additional("port"), with: "8080")
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) {
             page.availability(of: page.additionalAvailability) == "In use"
         }, "A port the primary listener uses is not free for another")
         page.cancel.click()
-        XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(page.apply.waitToDisappear(timeout: 5))
     }
 
     @MainActor
@@ -226,10 +236,10 @@ final class BackendSettingsUITests: MimicUITestCase {
         launchApp()
         createProjectViaUI(name: "Port validation")
         let page = BackendSettingsPage(app: app)
-        page.open.click()
-        XCTAssertTrue(page.primaryPort.waitForExistence(timeout: 5))
+        page.revealSettingsButton().click()
+        XCTAssertTrue(page.primaryPort.waitToExist(timeout: 5))
         page.replace(page.primaryPort, with: "abc")
-        XCTAssertTrue(page.primaryPortError.waitForExistence(timeout: 5))
+        XCTAssertTrue(page.primaryPortError.waitToExist(timeout: 5))
         XCTAssertFalse(page.apply.isEnabled)
         XCTAssertFalse(page.primaryCopy.isEnabled)
         XCTAssertFalse(app.staticTexts["http://localhost:0"].exists)
@@ -249,15 +259,15 @@ final class BackendSettingsUITests: MimicUITestCase {
         launchApp()
         createProjectViaUI(name: "Loopback validation")
         let page = BackendSettingsPage(app: app)
-        page.open.click()
-        XCTAssertTrue(page.primaryEnabled.waitForExistence(timeout: 5))
+        page.revealSettingsButton().click()
+        XCTAssertTrue(page.primaryEnabled.waitToExist(timeout: 5))
         page.primaryEnabled.click()
-        XCTAssertTrue(page.primaryUpstream.waitForExistence(timeout: 5))
+        XCTAssertTrue(page.primaryUpstream.waitToExist(timeout: 5))
 
         for upstream in ["http://localhost.:8080", "http://[::1]:8080"] {
             page.replace(page.primaryUpstream, with: upstream)
             page.apply.click()
-            XCTAssertTrue(page.primaryUpstreamError.waitForExistence(timeout: 5),
+            XCTAssertTrue(page.primaryUpstreamError.waitToExist(timeout: 5),
                           "Loopback equivalents need the same inline refusal as localhost")
             XCTAssertEqual(page.primaryUpstreamError.label,
                            "Enter an HTTP or HTTPS base URL outside these local listeners")
@@ -267,12 +277,12 @@ final class BackendSettingsUITests: MimicUITestCase {
         }
 
         page.replace(page.primaryUpstream, with: "http://localhost.:8081")
-        XCTAssertTrue(page.primaryUpstreamError.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(page.primaryUpstreamError.waitToDisappear(timeout: 5))
         page.apply.click()
-        XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5),
+        XCTAssertTrue(page.apply.waitToDisappear(timeout: 5),
                       "A different local server remains a supported upstream")
-        page.open.click()
-        XCTAssertTrue(page.primaryUpstream.waitForExistence(timeout: 5))
+        page.revealSettingsButton().click()
+        XCTAssertTrue(page.primaryUpstream.waitToExist(timeout: 5))
         XCTAssertEqual(page.primaryUpstream.value as? String, "http://localhost.:8081")
         page.cancel.click()
     }
@@ -312,30 +322,30 @@ final class BackendSettingsUITests: MimicUITestCase {
         launchApp()
         createProjectViaUI(name: "Listening ports")
         workspace.fillWindow()
-        XCTAssertTrue(workspace.centerFirstEndpointHeading.waitForExistence(timeout: 5),
+        XCTAssertTrue(workspace.centerFirstEndpointHeading.waitToExist(timeout: 5),
                       "An empty project must explain how to create its first endpoint")
         XCTAssertTrue(workspace.centerAddEndpointCard.exists,
                       "The first-endpoint chooser should offer Add endpoint")
         XCTAssertFalse(workspace.centerSelectEndpointMessage.exists,
                        "There is no endpoint available to select yet")
-        XCTAssertTrue(workspace.drawerEmptyHeading.waitForExistence(timeout: 5))
-        XCTAssertTrue(workspace.drawerCurlCommand.waitForExistence(timeout: 5),
+        XCTAssertTrue(workspace.drawerEmptyHeading.waitToExist(timeout: 5))
+        XCTAssertTrue(workspace.drawerCurlCommand.waitToExist(timeout: 5),
                       "A stopped server's empty log offers the request to try once it runs")
         let page = BackendSettingsPage(app: app)
-        page.open.click()
-        XCTAssertTrue(page.primaryPort.waitForExistence(timeout: 5))
+        page.revealSettingsButton().click()
+        XCTAssertTrue(page.primaryPort.waitToExist(timeout: 5))
         page.replace(page.primaryPort, with: String(primary))
         page.add.click()
-        XCTAssertTrue(page.additional("port").waitForExistence(timeout: 5))
+        XCTAssertTrue(page.additional("port").waitToExist(timeout: 5))
         page.replace(page.additional("name"), with: "Accounts")
         page.replace(page.additional("port"), with: String(secondary))
         page.apply.click()
-        XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(page.apply.waitToDisappear(timeout: 5))
         workspace.toggleServer()
         XCTAssertTrue(workspace.waitForServerURL(port: primary))
         XCTAssertTrue(page.portsDescription.contains("2 ports listening"))
         let curl = workspace.drawerCurlCommand
-        XCTAssertTrue(curl.waitForExistence(timeout: 5),
+        XCTAssertTrue(curl.waitToExist(timeout: 5),
                       "A running server must invite a request without asking to start again")
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) {
@@ -353,7 +363,7 @@ final class BackendSettingsUITests: MimicUITestCase {
         XCTAssertTrue(workspace.serverURLText(port: primary).isHittable)
         page.ports.click()
         let copy = page.portMenuItem(secondary, copying: true)
-        XCTAssertTrue(copy.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(copy.waitToExist(timeout: 5), app.debugDescription)
         copy.click()
         XCTAssertEqual(NSPasteboard.general.string(forType: .string), "http://localhost:\(secondary)")
         ServerStatusWellPage(app: app).closeDetails()
@@ -366,24 +376,24 @@ final class BackendSettingsUITests: MimicUITestCase {
         // Journeys navigator (⌘2), with no journey selected, leaves it on the project overview.
         createEndpointViaUI(name: "Users", path: "/api/users")
         app.typeKey("2", modifierFlags: .command)
-        if !InspectorPage(app: app).header.waitForExistence(timeout: 5) {
-            workspace.toggleInspectorButton.click()
+        if !InspectorPage(app: app).header.waitToExist(timeout: 5) {
+            workspace.revealInspectorToggle().click()
         }
         XCTAssertTrue(UITestApp.waitUntil(timeout: 5) { page.inspectorShowsPort(primary) })
-        page.open.click()
-        XCTAssertTrue(page.primaryPort.waitForExistence(timeout: 5))
+        page.revealSettingsButton().click()
+        XCTAssertTrue(page.primaryPort.waitToExist(timeout: 5))
         page.replace(page.primaryPort, with: String(primaryReplacement))
-        XCTAssertTrue(page.additionalSelection.waitForExistence(timeout: 5))
+        XCTAssertTrue(page.additionalSelection.waitToExist(timeout: 5))
         page.additionalSelection.click()
-        XCTAssertTrue(page.additional("port").waitForExistence(timeout: 5))
+        XCTAssertTrue(page.additional("port").waitToExist(timeout: 5))
         page.replace(page.additional("port"), with: String(replacement))
-        XCTAssertTrue(page.additionalState("pendingRestart").waitForExistence(timeout: 5))
+        XCTAssertTrue(page.additionalState("pendingRestart").waitToExist(timeout: 5))
         let pendingShot = XCTAttachment(screenshot: app.sheets.firstMatch.screenshot())
         pendingShot.name = "Backend settings — listener pending restart"
         pendingShot.lifetime = .keepAlways
         add(pendingShot)
         page.apply.click()
-        XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(page.apply.waitToDisappear(timeout: 5))
         XCTAssertTrue(page.portsDescription.contains("Restart required"))
         XCTAssertTrue(page.portsDescription.contains("Accounts: \(secondary)"))
         XCTAssertTrue(page.portsDescription.contains("Accounts: \(replacement)"))
@@ -400,8 +410,8 @@ final class BackendSettingsUITests: MimicUITestCase {
         if !shell.panel("drawer").exists {
             app.typeKey("l", modifierFlags: [.command, .option])
         }
-        XCTAssertTrue(shell.panel("drawer").waitForExistence(timeout: 5), "The request log should open")
-        XCTAssertTrue(workspace.drawerEmptyHeading.waitForExistence(timeout: 5))
+        XCTAssertTrue(shell.panel("drawer").waitToExist(timeout: 5), "The request log should open")
+        XCTAssertTrue(workspace.drawerEmptyHeading.waitToExist(timeout: 5))
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) {
                 let curl = workspace.drawerCurlCommand
@@ -426,26 +436,26 @@ final class BackendSettingsUITests: MimicUITestCase {
         launchApp()
         createProjectViaUI(name: "Settings draft")
         let page = BackendSettingsPage(app: app)
-        page.open.click()
-        XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
+        page.revealSettingsButton().click()
+        XCTAssertTrue(page.primaryName.waitToExist(timeout: 5))
         page.replace(page.primaryName, with: "Discarded")
         page.cancel.click()
-        page.open.click()
-        XCTAssertTrue(page.primaryName.waitForExistence(timeout: 5))
+        page.revealSettingsButton().click()
+        XCTAssertTrue(page.primaryName.waitToExist(timeout: 5))
         XCTAssertEqual(page.primaryName.value as? String, "Primary")
         page.primaryEnabled.click()
         page.replace(page.primaryUpstream, with: "https://api.example.com")
         page.apply.click()
-        XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
-        page.open.click()
-        XCTAssertTrue(page.primaryEnabled.waitForExistence(timeout: 5))
+        XCTAssertTrue(page.apply.waitToDisappear(timeout: 5))
+        page.revealSettingsButton().click()
+        XCTAssertTrue(page.primaryEnabled.waitToExist(timeout: 5))
         page.primaryEnabled.click()
         page.apply.click()
-        XCTAssertTrue(page.apply.waitForNonExistence(timeout: 5))
-        page.open.click()
+        XCTAssertTrue(page.apply.waitToDisappear(timeout: 5))
+        page.revealSettingsButton().click()
         XCTAssertFalse(page.primaryUpstream.exists)
         page.primaryEnabled.click()
-        XCTAssertTrue(page.primaryUpstream.waitForExistence(timeout: 5))
+        XCTAssertTrue(page.primaryUpstream.waitToExist(timeout: 5))
         XCTAssertEqual(page.primaryUpstream.value as? String, "https://api.example.com")
         page.cancel.click()
     }

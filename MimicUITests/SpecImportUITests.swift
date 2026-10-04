@@ -253,7 +253,7 @@ struct ImportSheetPage {
 
     /// Waits for the review screen to be on show.
     ///
-    /// Three candidates polled together, never `a.waitForExistence(t) || b.waitForExistence(t)` —
+    /// Three candidates polled together, never `a.waitToExist(t) || b.waitToExist(t)` —
     /// that form waits out the first element's entire timeout before it looks at the second. Three
     /// rather than one because they fail independently: `import.candidateList` is a container
     /// identifier, `import.candidate.index.0` is a row cell's, and the subtitle is the header's. A
@@ -1003,7 +1003,7 @@ final class SpecImportUITests: MimicUITestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        if element.waitForExistence(timeout: timeout) { return }
+        if element.waitToExist(timeout: timeout) { return }
         XCTFail("\(what) should exist.\n\(element.debugDescription)", file: file, line: line)
     }
 
@@ -1454,7 +1454,7 @@ final class SpecImportUITests: MimicUITestCase {
         assertReads(sheet.bodyPreviewText, #"{"ok":true}"#, "The literal captured response in the preview")
         assertExists(sheet.closeBodyPreview, "The preview's Close action")
         sheet.closeBodyPreview.click()
-        XCTAssertTrue(sheet.bodyPreviewText.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(sheet.bodyPreviewText.waitToDisappear(timeout: 5))
         assertExists(sheet.selectionCount("1 of 4 selected"), "Previewing must not toggle the row")
 
         sheet.candidatePath(at: 0).click()

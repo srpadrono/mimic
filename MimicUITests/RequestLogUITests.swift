@@ -147,6 +147,23 @@ final class RequestLogUITests: MimicUITestCase {
         return app.descendants(matching: .any).matching(carriesTheLabel).firstMatch
     }
 
+    /// Picks `method` ("All" or an HTTP method) from the method filter, and proves it took by the
+    /// control's value, which names the filter it applies. Through the shared value-picker helper
+    /// rather than a click on the item, which XCUITest looks up twice and can land a row away when
+    /// the open menu moves between the two.
+    @MainActor
+    private func chooseMethodFilter(_ method: String, file: StaticString = #filePath, line: UInt = #line) {
+        let control = methodFilterControl
+        XCTAssertTrue(
+            UITestApp.chooseMenuOption(method, in: control, of: app) {
+                control.exists && (control.value as? String) == method
+            },
+            "The method filter should offer \(method) and apply it — it reads \(UITestApp.spoken(control)), "
+                + "and \(UITestApp.describeOpenMenus(in: app))",
+            file: file, line: line
+        )
+    }
+
     /// The inspector's header, which is how the inspector's presence is witnessed.
     @MainActor
     private var inspectorHeader: XCUIElement { InspectorPage(app: app).header }
@@ -158,7 +175,7 @@ final class RequestLogUITests: MimicUITestCase {
     private func widenCentrePaneByHidingTheInspector() {
         guard inspectorHeader.exists else { return }
         app.typeKey("i", modifierFlags: [.command, .option])
-        _ = inspectorHeader.waitForNonExistence(timeout: 5)
+        _ = inspectorHeader.waitToDisappear(timeout: 5)
     }
 
     /// The text filter, by identifier or by its label ("Filter request log"), polled together.
@@ -324,7 +341,7 @@ final class RequestLogUITests: MimicUITestCase {
     @MainActor
     private func sort(by field: String, expecting state: String) {
         let header = columnHeader(field)
-        XCTAssertTrue(header.waitForExistence(timeout: 5), "The \(field) column header should be addressable")
+        XCTAssertTrue(header.waitToExist(timeout: 5), "The \(field) column header should be addressable")
         header.click()
         XCTAssertTrue(
             waitForSortState(field, state),
@@ -356,14 +373,15 @@ final class RequestLogUITests: MimicUITestCase {
         createProjectViaUI(name: "Real backend capture", port: 62130)
         workspace.fillWindow()
         let settings = BackendSettingsPage(app: app)
-        XCTAssertTrue(settings.open.waitForExistence(timeout: 5))
-        settings.open.click()
-        XCTAssertTrue(settings.primaryName.waitForExistence(timeout: 5))
+        let settingsButton = settings.revealSettingsButton()
+        XCTAssertTrue(settingsButton.waitToExist(timeout: 5))
+        settingsButton.click()
+        XCTAssertTrue(settings.primaryName.waitToExist(timeout: 5))
         settings.replace(settings.primaryName, with: "Catalog")
         settings.primaryEnabled.click()
         settings.replace(settings.primaryUpstream, with: "http://127.0.0.1:62131")
         settings.apply.click()
-        XCTAssertTrue(settings.apply.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(settings.apply.waitToDisappear(timeout: 5))
         workspace.toggleServer()
         XCTAssertTrue(workspace.waitForServerURL(port: 62130))
         await sendRequest(port: 62130, path: "/profile")
@@ -373,18 +391,18 @@ final class RequestLogUITests: MimicUITestCase {
         logRow(try XCTUnwrap(rowIdentifier(forPath: "/binary"))).click()
         XCTAssertTrue(requestDetail.waitForDetail(), app.debugDescription)
         let save = app.buttons["requestDetail.saveMock"].firstMatch
-        XCTAssertTrue(save.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(save.waitToExist(timeout: 5), app.debugDescription)
         XCTAssertFalse(save.isEnabled)
         // Why it cannot be saved sits beside what answered, on the Response tab.
         requestDetail.tab("Response").click()
-        XCTAssertTrue(element(identifiedBy: "requestDetail.captureIssue").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(identifiedBy: "requestDetail.captureIssue").waitToExist(timeout: 5))
         let binaryBodyNote = element(identifiedBy: "requestDetail.body.response.empty")
-        XCTAssertTrue(binaryBodyNote.waitForExistence(timeout: 5))
+        XCTAssertTrue(binaryBodyNote.waitToExist(timeout: 5))
         XCTAssertTrue([binaryBodyNote.label, binaryBodyNote.value as? String ?? ""].contains(
             "Binary or non-UTF-8 response body is not previewed"
         ), "The full explanation must be accessible, got \(text(of: binaryBodyNote))")
         logRow(try XCTUnwrap(rowIdentifier(forPath: "/profile"))).click()
-        XCTAssertTrue(save.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(save.waitToExist(timeout: 5), app.debugDescription)
         XCTAssertTrue(poll { save.isEnabled }, app.debugDescription)
         XCTAssertTrue(speech(of: element(identifiedBy: "requestDetail.summary.backend")).contains("Catalog"), app.debugDescription)
         let drawer = element(identifiedBy: "drawer")
@@ -396,12 +414,12 @@ final class RequestLogUITests: MimicUITestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
         save.click()
-        XCTAssertTrue(save.waitForNonExistence(timeout: 5))
-        settings.open.click()
-        XCTAssertTrue(settings.primaryEnabled.waitForExistence(timeout: 5))
+        XCTAssertTrue(save.waitToDisappear(timeout: 5))
+        settings.revealSettingsButton().click()
+        XCTAssertTrue(settings.primaryEnabled.waitToExist(timeout: 5))
         settings.primaryEnabled.click()
         settings.apply.click()
-        XCTAssertTrue(settings.apply.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(settings.apply.waitToDisappear(timeout: 5))
         let (data, response) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:62130/profile")!)
         XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
         XCTAssertEqual(String(decoding: data, as: UTF8.self), #"{"account":"Ada"}"#)
@@ -439,10 +457,10 @@ final class RequestLogUITests: MimicUITestCase {
         if !columnHeader("scenario").exists {
             widenCentrePaneByHidingTheInspector()
         }
-        if !columnHeader("scenario").waitForExistence(timeout: 2) {
+        if !columnHeader("scenario").waitToExist(timeout: 2) {
             workspace.hideSidebarIfShown()
         }
-        XCTAssertTrue(columnHeader("scenario").waitForExistence(timeout: 5),
+        XCTAssertTrue(columnHeader("scenario").waitToExist(timeout: 5),
                       "The wide request log should expose the Scenario column")
         XCTAssertFalse(columnHeader("endpoint").exists,
                        "What answered shares the Scenario column; there is no Endpoint column any more")
@@ -522,7 +540,7 @@ final class RequestLogUITests: MimicUITestCase {
             "All three requests should reach the log"
         )
         XCTAssertTrue(
-            headerCount("3 requests").waitForExistence(timeout: 5),
+            headerCount("3 requests").waitToExist(timeout: 5),
             "The header should count every request in the log"
         )
 
@@ -573,14 +591,11 @@ final class RequestLogUITests: MimicUITestCase {
         // The method menu at the filter field's leading edge, reached by identifier or label; see
         // ``methodFilterControl``. Its items are ordinary menu elements once it is open.
         XCTAssertTrue(
-            methodFilterControl.waitForExistence(timeout: 5),
+            methodFilterControl.waitToExist(timeout: 5),
             "The method filter should be addressable — the drawer header is saying "
                 + spokenHeaderControls()
         )
-        methodFilterControl.click()
-        let postItem = app.menuItems["POST"]
-        XCTAssertTrue(postItem.waitForExistence(timeout: 5), "The method menu should offer POST")
-        postItem.click()
+        chooseMethodFilter("POST")
 
         XCTAssertTrue(waitForVisibleRowCount(1), "Filtering by POST should leave the one POST")
         XCTAssertTrue(
@@ -588,20 +603,14 @@ final class RequestLogUITests: MimicUITestCase {
             "The surviving row should be the POST — it was \(firstRowLabel())"
         )
 
-        methodFilterControl.click()
-        let allItem = app.menuItems["All"]
-        XCTAssertTrue(allItem.waitForExistence(timeout: 5), "The method menu should offer All")
-        allItem.click()
+        chooseMethodFilter("All")
         XCTAssertTrue(waitForVisibleRowCount(3), "Choosing All should clear the method filter")
 
         await sendRequest(port: port, path: "/api/probe", method: "HEAD", body: nil)
         await sendRequest(port: port, path: "/api/probe", method: "OPTIONS", body: nil)
         XCTAssertTrue(waitForRowsToArrive(5, timeout: 15))
         for method in ["HEAD", "OPTIONS"] {
-            methodFilterControl.click()
-            let item = app.menuItems[method]
-            XCTAssertTrue(item.waitForExistence(timeout: 5), "The method filter should offer \(method)")
-            item.click()
+            chooseMethodFilter(method)
             XCTAssertTrue(waitForVisibleRowCount(1), "Filtering by \(method) should leave its one request")
             XCTAssertTrue(poll { self.firstRowLabel().hasPrefix("\(method) ") }, firstRowLabel())
         }
@@ -624,7 +633,7 @@ final class RequestLogUITests: MimicUITestCase {
         XCTAssertTrue(waitForRowsToArrive(1, timeout: 15), "The matched request should reach the log")
 
         // Nothing unmatched and nothing failed: the segments carry no counts, and All is chosen.
-        XCTAssertTrue(unmatchedSegment.waitForExistence(timeout: 5),
+        XCTAssertTrue(unmatchedSegment.waitToExist(timeout: 5),
                       "The Unmatched segment should be in the header — it is saying " + spokenHeaderControls())
         XCTAssertEqual(unmatchedSegment.label, "Unmatched", "With nothing unmatched the segment should carry no count")
         XCTAssertEqual(errorsSegment.label, "Errors", "With nothing failed the Errors segment should carry no count")
@@ -647,17 +656,18 @@ final class RequestLogUITests: MimicUITestCase {
         // Xcode's warning count jumps you to the issue navigator.
         ServerStatusWellPage(app: app).revealTrafficControlsIfCompact()
         let toolbarBadge = app.buttons["1 unmatched request, show it"].firstMatch
-        if toolbarBadge.waitForExistence(timeout: 2) {
+        if toolbarBadge.waitToExist(timeout: 2) {
             toolbarBadge.click()
         } else {
             // On a compact display the well intentionally hides traffic counts. The center
             // toolbar's overflow menu keeps the same unmatched-request action reachable.
             let overflow = WorkspacePage(app: app).overflowMenu
-            XCTAssertTrue(overflow.waitForExistence(timeout: 5))
+            XCTAssertTrue(overflow.waitToExist(timeout: 5))
             XCTAssertEqual(overflow.value as? String, "1 unmatched request")
-            overflow.click()
             let showUnmatched = app.menuItems["toolbar.showUnmatched"]
-            XCTAssertTrue(showUnmatched.waitForExistence(timeout: 5))
+            XCTAssertTrue(UITestApp.click(overflow, expecting: { showUnmatched.exists }),
+                          "More actions should open — \(UITestApp.describe(overflow))")
+            XCTAssertTrue(showUnmatched.waitToExist(timeout: 5))
             showUnmatched.click()
         }
         XCTAssertTrue(waitForVisibleRowCount(1), "The badge should filter the log down to the unmatched call")
@@ -686,7 +696,7 @@ final class RequestLogUITests: MimicUITestCase {
 
         // Clearing empties the log outright, and the panel falls back to its idle state — not to the
         // "No matching requests" one, which would be a filter still claiming to be filtering.
-        XCTAssertTrue(clearLogButton.waitForExistence(timeout: 5), "The header should offer a clear button")
+        XCTAssertTrue(clearLogButton.waitToExist(timeout: 5), "The header should offer a clear button")
 
         // Keep the inspector open. The filter moves to a second pinned row when the centre pane
         // narrows, so the clear action must remain reachable without changing the user's layout.
@@ -752,7 +762,7 @@ final class RequestLogUITests: MimicUITestCase {
 
         XCTAssertTrue(waitForRowsToArrive(2, timeout: 15), "Both requests should reach the log")
         XCTAssertTrue(
-            headerCount("2 requests").waitForExistence(timeout: 5),
+            headerCount("2 requests").waitToExist(timeout: 5),
             "The drawer header should count the requests in the log"
         )
 
@@ -781,7 +791,7 @@ final class RequestLogUITests: MimicUITestCase {
             "Clicking a row should open its detail beside the log"
         )
         XCTAssertTrue(
-            requestDetail.goToEndpointButton.waitForExistence(timeout: 5),
+            requestDetail.goToEndpointButton.waitToExist(timeout: 5),
             "A request an endpoint answered should offer to open that endpoint"
         )
         XCTAssertFalse(requestDetail.createEndpointButton.exists, "An answered request needs no new endpoint")
@@ -789,22 +799,22 @@ final class RequestLogUITests: MimicUITestCase {
         // The identity block: method, status and time. `DSMethodLabel` prefixes the identifier it is
         // handed, so both spellings are matched.
         let methodBadge = element(identifiedByAnyOf: ["requestDetail.method", "ds.method.requestDetail.method"])
-        XCTAssertTrue(methodBadge.waitForExistence(timeout: 5), "The identity line should show the method badge")
+        XCTAssertTrue(methodBadge.waitToExist(timeout: 5), "The identity line should show the method badge")
         XCTAssertTrue(
             text(of: methodBadge).contains("POST"),
             "The badge should name the method — it read \(text(of: methodBadge))"
         )
-        XCTAssertTrue(requestDetail.status.waitForExistence(timeout: 5), "The identity line should show the status")
+        XCTAssertTrue(requestDetail.status.waitToExist(timeout: 5), "The identity line should show the status")
         XCTAssertTrue(
             text(of: requestDetail.status).contains("200"),
             "The status pill should carry the code — it read \(text(of: requestDetail.status))"
         )
         XCTAssertTrue(
-            element(identifiedBy: "requestDetail.timestamp").waitForExistence(timeout: 5),
+            element(identifiedBy: "requestDetail.timestamp").waitToExist(timeout: 5),
             "The identity line should show when the request arrived"
         )
         let outcomeSentence = element(identifiedBy: "requestDetail.outcome")
-        XCTAssertTrue(outcomeSentence.waitForExistence(timeout: 5), "The identity block should say what answered")
+        XCTAssertTrue(outcomeSentence.waitToExist(timeout: 5), "The identity block should say what answered")
         XCTAssertTrue(
             text(of: outcomeSentence).contains("Answered by Users"),
             "The outcome sentence should name the endpoint — it read \(text(of: outcomeSentence))"
@@ -816,14 +826,14 @@ final class RequestLogUITests: MimicUITestCase {
 
         // Request is the tab a selection opens on: where the call arrived, then its headers.
         XCTAssertTrue(
-            element(identifiedBy: "ds.sectionheader.requestDetail.request.summary").waitForExistence(timeout: 5),
+            element(identifiedBy: "ds.sectionheader.requestDetail.request.summary").waitToExist(timeout: 5),
             "The Request tab should head its first section 'Summary'"
         )
         let urlRow = element(identifiedBy: "requestDetail.summary.url")
-        XCTAssertTrue(urlRow.waitForExistence(timeout: 5), "The Request tab should show the URL the client called")
+        XCTAssertTrue(urlRow.waitToExist(timeout: 5), "The Request tab should show the URL the client called")
         XCTAssertTrue(text(of: urlRow).contains("/api/users"), "The URL should carry the path — it read \(text(of: urlRow))")
         XCTAssertTrue(
-            element(identifiedBy: "ds.sectionheader.requestDetail.headers.request").waitForExistence(timeout: 5),
+            element(identifiedBy: "ds.sectionheader.requestDetail.headers.request").waitToExist(timeout: 5),
             "The Request tab should list the request headers"
         )
         // Assert on the rows rather than only on the section title — and pair the count with the
@@ -840,11 +850,11 @@ final class RequestLogUITests: MimicUITestCase {
         // Response: what answered, then the response's own headers.
         requestDetail.tab("Response").click()
         XCTAssertTrue(
-            element(identifiedBy: "ds.sectionheader.requestDetail.answeredBy").waitForExistence(timeout: 5),
+            element(identifiedBy: "ds.sectionheader.requestDetail.answeredBy").waitToExist(timeout: 5),
             "The Response tab should head its first section 'Answered by'"
         )
         let outcomeRow = element(identifiedBy: "requestDetail.summary.outcome")
-        XCTAssertTrue(outcomeRow.waitForExistence(timeout: 5), "Response should state the outcome")
+        XCTAssertTrue(outcomeRow.waitToExist(timeout: 5), "Response should state the outcome")
         XCTAssertTrue(
             text(of: outcomeRow).localizedCaseInsensitiveContains("endpoint"),
             "An endpoint answered this call — the row read \(text(of: outcomeRow))"
@@ -873,7 +883,7 @@ final class RequestLogUITests: MimicUITestCase {
         // Timing: when it arrived, how long it took, and what each half carried.
         requestDetail.tab("Timing").click()
         XCTAssertTrue(
-            element(identifiedBy: "ds.sectionheader.requestDetail.timing").waitForExistence(timeout: 5),
+            element(identifiedBy: "ds.sectionheader.requestDetail.timing").waitToExist(timeout: 5),
             "The Timing tab should head its first section 'Timing'"
         )
         XCTAssertTrue(
@@ -895,7 +905,7 @@ final class RequestLogUITests: MimicUITestCase {
         // button that leaves request detail altogether.
         requestDetail.tab("Response").click()
         XCTAssertTrue(
-            element(identifiedBy: "requestDetail.summary.outcome").waitForExistence(timeout: 5),
+            element(identifiedBy: "requestDetail.summary.outcome").waitToExist(timeout: 5),
             "Switching back to Response should show the answered-by rows again"
         )
     }
@@ -929,7 +939,7 @@ final class RequestLogUITests: MimicUITestCase {
         // A new endpoint's default scenario has no body, so this is the empty arm — the one a reader
         // meets most often.
         XCTAssertTrue(
-            element(identifiedBy: "requestDetail.body.response.empty").waitForExistence(timeout: 5),
+            element(identifiedBy: "requestDetail.body.response.empty").waitToExist(timeout: 5),
             "A scenario with no body should say so rather than rendering nothing"
         )
         // The faint Response / All copy pair is gone; copying a body lives in the row's menu.
@@ -939,7 +949,7 @@ final class RequestLogUITests: MimicUITestCase {
         // The payload is on the Request tab, and there is no find field over it.
         requestDetail.tab("Request").click()
         XCTAssertTrue(
-            element(identifiedBy: "requestLog.body.request").waitForExistence(timeout: 5),
+            element(identifiedBy: "requestLog.body.request").waitToExist(timeout: 5),
             "The POST payload should be rendered on the Request tab"
         )
         XCTAssertFalse(element(identifiedBy: "requestDetail.bodySearchField").exists, "The detail has no find field")
@@ -952,7 +962,7 @@ final class RequestLogUITests: MimicUITestCase {
             "Selecting another row should show it — the detail read \(requestDetail.shownPath())"
         )
         XCTAssertTrue(
-            element(identifiedBy: "ds.sectionheader.requestDetail.query").waitForExistence(timeout: 5),
+            element(identifiedBy: "ds.sectionheader.requestDetail.query").waitToExist(timeout: 5),
             "A request with a query string should list its items"
         )
         XCTAssertTrue(
@@ -960,7 +970,7 @@ final class RequestLogUITests: MimicUITestCase {
             "The query row should name the item"
         )
         XCTAssertTrue(
-            element(identifiedBy: "requestDetail.body.request.empty").waitForExistence(timeout: 5),
+            element(identifiedBy: "requestDetail.body.request.empty").waitToExist(timeout: 5),
             "A GET with no payload should say it has no body"
         )
         let outcomeSentence = element(identifiedBy: "requestDetail.outcome")
@@ -969,18 +979,18 @@ final class RequestLogUITests: MimicUITestCase {
             "The header should say what Mimic did — it read \(text(of: outcomeSentence))"
         )
         XCTAssertTrue(
-            requestDetail.createEndpointButton.waitForExistence(timeout: 5),
+            requestDetail.createEndpointButton.waitToExist(timeout: 5),
             "An unmatched request should offer to create its endpoint"
         )
         XCTAssertFalse(requestDetail.goToEndpointButton.exists, "Nothing answered, so there is no endpoint to open")
 
         requestDetail.tab("Response").click()
         XCTAssertTrue(
-            element(identifiedBy: "requestLog.body.response").waitForExistence(timeout: 5),
+            element(identifiedBy: "requestLog.body.response").waitToExist(timeout: 5),
             "The fallback response body should be rendered"
         )
         XCTAssertTrue(
-            element(identifiedBy: "requestDetail.unmatchedHint").waitForExistence(timeout: 5),
+            element(identifiedBy: "requestDetail.unmatchedHint").waitToExist(timeout: 5),
             "An unmatched request should explain that Mimic answered with its fallback"
         )
         XCTAssertTrue(
@@ -995,7 +1005,7 @@ final class RequestLogUITests: MimicUITestCase {
         NSPasteboard.general.clearContents()
         logRow(unmatchedID).rightClick()
         let copyBody = app.menuItems["Copy response body"]
-        XCTAssertTrue(copyBody.waitForExistence(timeout: 5), "The row's context menu should offer Copy response body")
+        XCTAssertTrue(copyBody.waitToExist(timeout: 5), "The row's context menu should offer Copy response body")
         copyBody.click()
         XCTAssertTrue(
             poll { NSPasteboard.general.string(forType: .string)?.isEmpty == false },
@@ -1009,7 +1019,7 @@ final class RequestLogUITests: MimicUITestCase {
             "Creating an endpoint from the detail should open it in the editor — the editor showed "
                 + text(of: endpointEditor.pathLabel)
         )
-        XCTAssertTrue(requestDetail.path.waitForNonExistence(timeout: 5), "The detail should close")
+        XCTAssertTrue(requestDetail.path.waitToDisappear(timeout: 5), "The detail should close")
     }
 
     @MainActor
@@ -1026,25 +1036,25 @@ final class RequestLogUITests: MimicUITestCase {
 
         requestDetail.tab("Timing").click()
         let bodySummary = element(identifiedBy: "requestDetail.summary.request body")
-        XCTAssertTrue(bodySummary.waitForExistence(timeout: 5))
+        XCTAssertTrue(bodySummary.waitToExist(timeout: 5))
         XCTAssertTrue(text(of: bodySummary).contains("64.0 KB (truncated)"), text(of: bodySummary))
         requestDetail.tab("Request").click()
         let truncation = element(identifiedBy: "requestDetail.body.request.truncated")
-        XCTAssertTrue(truncation.waitForExistence(timeout: 5))
+        XCTAssertTrue(truncation.waitToExist(timeout: 5))
         XCTAssertTrue(text(of: truncation).contains("Truncated at 64 KB."), text(of: truncation))
 
         let curl = element(identifiedBy: "requestDetail.copy.curl")
-        XCTAssertTrue(curl.waitForExistence(timeout: 5))
+        XCTAssertTrue(curl.waitToExist(timeout: 5))
         XCTAssertFalse(curl.isEnabled, "A stored prefix cannot reproduce the original request")
         XCTAssertTrue(curl.label.contains("request body was truncated"), curl.label)
 
         // The row's menu refuses the same way.
         logRow(try XCTUnwrap(rowIdentifier(forPath: "/api/large"))).rightClick()
         let menuCurl = app.menuItems["Copy as cURL"]
-        XCTAssertTrue(menuCurl.waitForExistence(timeout: 5), "The row's context menu should offer Copy as cURL")
+        XCTAssertTrue(menuCurl.waitToExist(timeout: 5), "The row's context menu should offer Copy as cURL")
         XCTAssertFalse(menuCurl.isEnabled, "The row's menu cannot copy a truncated request as cURL either")
         app.typeKey(.escape, modifierFlags: [])
-        XCTAssertTrue(menuCurl.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(menuCurl.waitToDisappear(timeout: 5))
         XCTAssertFalse(payload.isEmpty)
     }
 
@@ -1072,29 +1082,26 @@ final class RequestLogUITests: MimicUITestCase {
         // menu that never appeared.
         logRow(matchedID).rightClick()
         let journeyItem = app.menuItems["Add to journey"]
-        XCTAssertTrue(journeyItem.waitForExistence(timeout: 5), "The row's context menu should open")
+        XCTAssertTrue(journeyItem.waitToExist(timeout: 5), "The row's context menu should open")
         XCTAssertFalse(
             app.menuItems["Create endpoint\u{2026}"].exists,
             "A row an endpoint already answered should not be offered a new endpoint"
         )
         app.typeKey(.escape, modifierFlags: [])
-        XCTAssertTrue(journeyItem.waitForNonExistence(timeout: 5), "Escape should dismiss the context menu")
+        XCTAssertTrue(journeyItem.waitToDisappear(timeout: 5), "Escape should dismiss the context menu")
 
         // Traffic remains available while editing journeys. Creating its missing mock must switch
         // the editor back to Endpoints rather than silently selecting an off-screen endpoint.
         let shell = WorkspaceShellPage(app: app)
         shell.journeysTab.click()
-        // The journeys screen opens without the log, as designed; ⌥⌘L brings it back beside a journey.
-        XCTAssertTrue(logRow(unmatchedID).waitForNonExistence(timeout: 5),
-                      "The journeys screen should open without the request log")
-        app.typeKey("l", modifierFlags: [.command, .option])
-        XCTAssertTrue(logRow(unmatchedID).waitForExistence(timeout: 5),
-                      "The request log toggle should show the log on the journeys screen")
+        // The log keeps the visibility it had on Endpoints: switching screens never opens or closes it.
+        XCTAssertTrue(logRow(unmatchedID).waitToExist(timeout: 5),
+                      "The journeys screen should keep the request log the endpoints screen showed")
 
         logRow(unmatchedID).rightClick()
         let createItem = app.menuItems["Create endpoint\u{2026}"]
         XCTAssertTrue(
-            createItem.waitForExistence(timeout: 5),
+            createItem.waitToExist(timeout: 5),
             "An unmatched row should offer to create the endpoint it is missing"
         )
         createItem.click()
@@ -1141,7 +1148,7 @@ final class RequestLogUITests: MimicUITestCase {
 
         let singularMenu = app.menuItems["Add to journey"]
         XCTAssertTrue(
-            singularMenu.waitForExistence(timeout: 5),
+            singularMenu.waitToExist(timeout: 5),
             "A right-click outside the selection should offer to capture that one row; "
                 + "menu items \(app.menuItems.allElementsBoundByIndex.map(\.title)), "
                 + "rows \(identifiers.map { logRow($0).label })"
@@ -1188,11 +1195,11 @@ final class RequestLogUITests: MimicUITestCase {
         captureSheet.createButton.click()
 
         XCTAssertTrue(
-            app.staticTexts["journeyEditor.name"].waitForExistence(timeout: 10),
+            app.staticTexts["journeyEditor.name"].waitToExist(timeout: 10),
             "Creating the journey should open it in the editor"
         )
         XCTAssertTrue(
-            element(identifiedBy: "journeyStep-0").waitForExistence(timeout: 5),
+            element(identifiedBy: "journeyStep-0").waitToExist(timeout: 5),
             "The captured request should be the journey's first step"
         )
         XCTAssertFalse(
@@ -1273,11 +1280,11 @@ final class RequestLogUITests: MimicUITestCase {
         // inspect and the inspector leaves with it.
         logRow(identifiers[0]).click()
         XCTAssertTrue(
-            requestDetail.path.waitForNonExistence(timeout: 5),
+            requestDetail.path.waitToDisappear(timeout: 5),
             "Clicking the only selected row again should clear the selection and close the detail"
         )
         XCTAssertTrue(
-            inspectorHeader.waitForNonExistence(timeout: 5),
+            inspectorHeader.waitToDisappear(timeout: 5),
             "With nothing to inspect, the inspector should stay away once the detail closes"
         )
 
@@ -1318,11 +1325,11 @@ final class RequestLogUITests: MimicUITestCase {
         logRow(identifiers[2]).rightClick()
         let rangeMenu = app.menuItems["Add 3 requests to journey"]
         XCTAssertTrue(
-            rangeMenu.waitForExistence(timeout: 5),
+            rangeMenu.waitToExist(timeout: 5),
             "A shift-click should extend the selection over the range between the two rows"
         )
         app.typeKey(.escape, modifierFlags: [])
-        XCTAssertTrue(rangeMenu.waitForNonExistence(timeout: 5), "Escape should dismiss the context menu")
+        XCTAssertTrue(rangeMenu.waitToDisappear(timeout: 5), "Escape should dismiss the context menu")
 
         // The click is what hands the table keyboard focus, so it is a precondition of the presses
         // rather than part of what they are proving.
@@ -1352,7 +1359,7 @@ final class RequestLogUITests: MimicUITestCase {
 
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(
-            inspectorHeader.waitForNonExistence(timeout: 5),
+            inspectorHeader.waitToDisappear(timeout: 5),
             "Escape should clear the selection, and with it the empty project's inspector"
         )
     }
@@ -1370,8 +1377,8 @@ final class RequestLogUITests: MimicUITestCase {
         startServer(projectNamed: "Traffic Test", port: port)
         createEndpointViaUI(name: "Users", path: "/api/users")
 
-        XCTAssertTrue(inspector.traffic.waitForExistence(timeout: 5), "A selected endpoint should show its traffic")
-        XCTAssertTrue(inspector.trafficServed.waitForExistence(timeout: 5),
+        XCTAssertTrue(inspector.traffic.waitToExist(timeout: 5), "A selected endpoint should show its traffic")
+        XCTAssertTrue(inspector.trafficServed.waitToExist(timeout: 5),
                       "An endpoint nothing has called should still show its figures")
         XCTAssertTrue(
             poll { self.speech(of: inspector.trafficServed).contains("0") },
@@ -1384,7 +1391,7 @@ final class RequestLogUITests: MimicUITestCase {
         XCTAssertTrue(waitForRowsToArrive(3, timeout: 15), "All three requests should reach the log")
 
         // Only the endpoint's own two calls are counted; the unmatched /api/orders is not its traffic.
-        XCTAssertTrue(inspector.trafficServed.waitForExistence(timeout: 10), "The section should count what was served")
+        XCTAssertTrue(inspector.trafficServed.waitToExist(timeout: 10), "The section should count what was served")
         XCTAssertTrue(
             poll { self.speech(of: inspector.trafficServed).contains("2") },
             "Served should count the endpoint's two calls — it read \(speech(of: inspector.trafficServed))"

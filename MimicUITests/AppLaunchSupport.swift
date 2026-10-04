@@ -76,11 +76,22 @@ enum UITestApp {
         return nil
     }
 
-    /// Waits for a condition, polling until it holds or the deadline passes.
+    /// Waits for a condition, polling until it holds or the deadline passes, and returns the last
+    /// evaluation.
     ///
     /// Preferred over a fixed pause, which is wrong in both directions: too short and the test is
     /// flaky, too long and every run pays for it. Polling returns the moment the condition is true
-    /// and still fails within a bounded time when it never becomes true.
+    /// and still fails within a bounded time when it never becomes true. It looks once before any
+    /// pause, so a condition that already holds costs one evaluation, and a `timeout` of 0 is a
+    /// single look.
+    ///
+    /// **Between looks the run loop turns; the thread does not just sleep.** XCTest's waits run the
+    /// current run loop while they wait (its headers say so of `waitForExpectations`), and
+    /// `waitToExist`/`waitToDisappear`, which replaced them across the suite, come through here.
+    /// Anything queued on the main thread while a test waits, such as a main-actor continuation or a
+    /// callback XCTest delivers there, therefore still runs during the wait, as it did inside XCTest's.
+    /// Off the main thread a run loop usually has nothing to run and returns at once; the sleep below
+    /// keeps the poll a poll there.
     @discardableResult
     static func waitUntil(
         timeout: TimeInterval,
@@ -90,14 +101,16 @@ enum UITestApp {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if condition() { return true }
-            Thread.sleep(forTimeInterval: pollInterval)
+            if CFRunLoopRunInMode(.defaultMode, pollInterval, false) == .finished {
+                Thread.sleep(forTimeInterval: pollInterval)
+            }
         }
         return condition()
     }
 
     /// Waits until any one of `elements` exists, polling all of them together.
     ///
-    /// Prefer this over `a.waitForExistence(t) || b.waitForExistence(t)`. That form waits out `a`'s
+    /// Prefer this over `a.waitToExist(t) || b.waitToExist(t)`. That form waits out `a`'s
     /// *entire* timeout before it ever looks at `b`, so a short-lived `b` can appear and disappear
     /// inside `a`'s wait — the test then fails reporting that neither was seen, when in fact one was
     /// on screen the whole time. That is precisely how the autosave assertion failed: `.saving` lasts
@@ -136,7 +149,7 @@ enum UITestApp {
 
     /// Waits until `element` reports the same non-empty frame twice in a row.
     ///
-    /// `waitForExistence` answers "is it in the accessibility tree", which for an AppKit menu happens
+    /// `waitToExist` answers "is it in the accessibility tree", which for an AppKit menu happens
     /// when the menu is *created* — before it has been positioned and while it is still fading in. A
     /// `click()` in that window computes a frame that is about to change and synthesizes the event at
     /// coordinates the item has already left, so the click lands on the menu's backdrop, the menu
@@ -152,15 +165,98 @@ enum UITestApp {
     /// raises an XCTest failure, and every suite here runs with `continueAfterFailure = false`, so a
     /// menu that closed underneath this helper would end the test rather than let the caller retry.
     /// `try?` turns that into "no reading yet".
+    ///
+    /// Returns the frame the two readings agreed on, or `nil` when they never did, so a caller that
+    /// needs a point to click or a size to compare takes it from the readings that proved it still.
     @MainActor
-    static func waitForStableFrame(_ element: XCUIElement, timeout: TimeInterval = 2) {
+    @discardableResult
+    static func waitForStableFrame(_ element: XCUIElement, timeout: TimeInterval = 2) -> CGRect? {
         var previous: CGRect?
+        var settled: CGRect?
         _ = waitUntil(timeout: timeout, pollInterval: 0.1) {
             let current = (try? element.snapshot())?.frame
             defer { previous = current }
-            guard let current, current.width > 0, current.height > 0 else { return false }
-            return current == previous
+            guard let current, current.width > 0, current.height > 0, current == previous else { return false }
+            settled = current
+            return true
         }
+        return settled
+    }
+
+    /// What an element is called and where it is, as one string for an activity or a failure
+    /// message. Read through a snapshot, so an element that is not in the tree is described as such
+    /// rather than failing the test on the read.
+    @MainActor
+    static func describe(_ element: XCUIElement) -> String {
+        guard let snapshot = try? element.snapshot() else { return "<not in the tree>" }
+        let name = snapshot.identifier.isEmpty ? snapshot.label : snapshot.identifier
+        return "'\(name)' at \(snapshot.frame)"
+    }
+
+    /// Everything an element says, label and value, read the same way as ``describe(_:)``.
+    @MainActor
+    static func spoken(_ element: XCUIElement) -> String {
+        guard let snapshot = try? element.snapshot() else { return "<not in the tree>" }
+        let value = snapshot.value.map { String(describing: $0) } ?? ""
+        return "\(snapshot.label) \(value)".trimmingCharacters(in: .whitespaces)
+    }
+
+    // MARK: - Clicks that open something
+
+    /// Clicks `element` to open something, a sheet, a menu or a popover, and returns once `opened`
+    /// holds.
+    ///
+    /// A bare `click()` the moment an element enters the tree is how "The step sheet should open"
+    /// failed on CI with nothing to say why: "Add step" was in the tree, but CI's always-visible
+    /// scroll bar lay across it, so the click went to the scroller. This waits for what a person's
+    /// click needs first, the element in the tree, under the pointer and not moving, then clicks once
+    /// and watches for the outcome.
+    ///
+    /// **Hittability is waited for, not required.** `isHittable` has said no about a control a click
+    /// then reached (the note at the click in `JourneyEditorUITests.testStepsEmptyStateAddsTheFirstStep`),
+    /// so one that never becomes hittable is still clicked and the outcome decides. The result
+    /// bundle records that it was not hittable and where it was, which is the first question such a
+    /// failure raises.
+    ///
+    /// **Only for clicks that open something.** A second click on a toggle undoes the first, so a
+    /// retry could turn a missed click into a pass for the wrong reason. A sheet or a menu that has
+    /// visibly not opened is safe to ask for again, and `opened` is checked once more just before
+    /// the second click, so an open that was only slow is not clicked shut. A retry is recorded as an
+    /// activity, so a pass on the second click shows in the result bundle instead of passing quietly.
+    ///
+    /// Returns whether `opened` ever held, so the caller asserts with its own message.
+    @MainActor
+    @discardableResult
+    static func click(
+        _ element: XCUIElement,
+        expecting opened: () -> Bool,
+        attempts: Int = 2,
+        timeout: TimeInterval = 5
+    ) -> Bool {
+        let rounds = max(1, attempts)
+        for attempt in 1...rounds {
+            if attempt > 1 {
+                if opened() { return true }
+                XCTContext.runActivity(
+                    named: "The click on \(describe(element)) opened nothing; clicking again "
+                        + "(attempt \(attempt) of \(rounds))"
+                ) { _ in }
+            }
+            guard element.waitToExist(timeout: timeout) else {
+                XCTContext.runActivity(named: "Nothing to click: the element never appeared") { _ in }
+                return opened()
+            }
+            if !waitUntil(timeout: 2, pollInterval: 0.1, { element.exists && element.isHittable }) {
+                XCTContext.runActivity(named: "\(describe(element)) is not hittable; clicking it anyway") { _ in }
+            }
+            waitForStableFrame(element)
+            element.click()
+            // The full clock only on the last click, as in `chooseFromSubmenu`: a missed click is
+            // found out quickly and a slow open is still waited out.
+            let wait = attempt == rounds ? timeout : min(timeout, 3)
+            if waitUntil(timeout: wait, pollInterval: 0.1, opened) { return true }
+        }
+        return false
     }
 
     /// Closes whatever menu is open, including a submenu, and returns once none is.
@@ -228,6 +324,11 @@ enum UITestApp {
     ) -> Bool {
         let rounds = max(1, attempts)
         for attempt in 1...rounds {
+            // An outcome that was only slower than the short wait has arrived by now. Driving the
+            // menu again would pick the item a second time, or find no menu behind the sheet it
+            // opened and report a failure with the sheet on screen; `click(_:expecting:)` checks the
+            // same way.
+            if attempt > 1, outcome.exists { return true }
             if attempt > 1 || !menuIsAlreadyOpen {
                 if attempt > 1 {
                     // A marker with an empty body, and the only trace a retry leaves. It lands in the
@@ -242,20 +343,89 @@ enum UITestApp {
                 reopenMenu()
             }
 
-            guard parent.waitForExistence(timeout: menuTimeout) else { continue }
+            guard parent.waitToExist(timeout: menuTimeout) else { continue }
             waitForStableFrame(parent)
             parent.click()
 
-            guard item.waitForExistence(timeout: menuTimeout) else { continue }
-            waitForStableFrame(item)
-            item.click()
+            // Clicked in place, not with `item.click()`, whose second lookup can read a submenu that
+            // closed under the pointer (``clickSubmenuItem(_:of:in:attempts:)``). One try: a submenu
+            // that closed is what this loop's next attempt reopens it for.
+            guard item.waitToExist(timeout: menuTimeout),
+                  clickSubmenuItem(item, of: parent, in: app, attempts: 1)
+            else { continue }
 
             // The full clock only on the way out. An intermediate attempt that waits fifteen seconds
             // for something a missed click means will never come turns a three-attempt helper into a
             // forty-five-second one, on a test that already runs past a minute.
             let isLastAttempt = attempt == rounds
             let wait = isLastAttempt ? outcomeTimeout : min(outcomeTimeout, 4)
-            if outcome.waitForExistence(timeout: wait) { return true }
+            if outcome.waitToExist(timeout: wait) { return true }
+        }
+        return outcome.exists
+    }
+
+    /// Clicks `item`, an item of the submenu that `parent` opens, once the pointer is on it and the
+    /// submenu is still open, and returns whether it clicked.
+    ///
+    /// **Not `item.click()`.** XCUITest moves the pointer onto a menu item, then looks the item up
+    /// again and clicks where that second lookup says it is. Moving into a submenu means leaving its
+    /// parent's menu, and on CI the submenu has closed during that move: run 37190636173 recorded
+    /// More ▸ Import, which opens to the *left* of More at the 1024pt screen's right edge, closing as
+    /// the pointer crossed into it on both attempts of `testImportMenuOpensHARSheet`. The second
+    /// lookup then read a closed menu's item: once a stale, unhittable frame, which XCUITest hovered
+    /// for seven seconds before its own retry reopened the submenu, and once an infinite one, which
+    /// raised `point.x != INFINITY` inside XCUITest and ended the test with no retry. A larger
+    /// display leaves room on the right, where the submenu opens instead, so it never failed
+    /// locally: the pinned screen sizes the window, but AppKit places menus on the real one.
+    ///
+    /// **What this does instead.** It reads the item's frame until two readings agree, moves the
+    /// pointer to its middle as an offset from the window, which an open menu does not move, and
+    /// clicks that same point only once two readings a poll apart find the item still hittable
+    /// there. The click therefore neither moves the pointer nor looks the item up. When the submenu
+    /// closed under the move, it hovers `parent` again, which is how AppKit reopens a submenu, and
+    /// tries again; each retry is an activity in the result bundle.
+    ///
+    /// `parent` is the submenu's own item in the enclosing menu. Hovering a button opens nothing, so
+    /// an item of a first-level menu gets `attempts: 1`. Returns false when the item never stayed
+    /// open under the pointer; what the item opens is still the caller's assertion.
+    @MainActor
+    @discardableResult
+    static func clickSubmenuItem(
+        _ item: XCUIElement,
+        of parent: XCUIElement,
+        in app: XCUIApplication,
+        attempts: Int = 3
+    ) -> Bool {
+        let rounds = max(1, attempts)
+        for attempt in 1...rounds {
+            if attempt > 1 {
+                XCTContext.runActivity(
+                    named: "The submenu closed as the pointer moved onto \(describe(item)); hovering "
+                        + "\(describe(parent)) to reopen it (attempt \(attempt) of \(rounds))"
+                ) { _ in }
+                guard parent.exists, parent.isHittable, let frame = waitForStableFrame(parent) else { return false }
+                windowAnchoredCoordinate(of: CGPoint(x: frame.midX, y: frame.midY), in: app).hover()
+            }
+            guard waitUntil(timeout: 3, pollInterval: 0.1, { item.exists && item.isHittable }),
+                  let frame = waitForStableFrame(item)
+            else { continue }
+            let point = windowAnchoredCoordinate(of: CGPoint(x: frame.midX, y: frame.midY), in: app)
+            point.hover()
+            // Open under the pointer twice in a row, at the frame the point came from: a submenu
+            // that closed on the way in reads unhittable (or leaves the tree) here.
+            var openReadings = 0
+            var closed = false
+            waitUntil(timeout: 1, pollInterval: 0.1) {
+                guard item.exists, item.isHittable, (try? item.snapshot())?.frame == frame else {
+                    closed = true
+                    return true
+                }
+                openReadings += 1
+                return openReadings == 2
+            }
+            guard !closed, openReadings == 2 else { continue }
+            point.click()
+            return true
         }
         return false
     }
@@ -300,17 +470,17 @@ enum UITestApp {
                 ) { _ in }
                 if item.exists {
                     app.typeKey(.escape, modifierFlags: [])
-                    _ = item.waitForNonExistence(timeout: 1)
+                    _ = item.waitToDisappear(timeout: 1)
                 }
             }
 
-            guard menu.waitForExistence(timeout: menuTimeout) else { continue }
+            guard menu.waitToExist(timeout: menuTimeout) else { continue }
             waitForStableFrame(menu)
             menu.click()
 
             // Where items are published, their appearance says the menu is open. Where they are
             // not, the wait simply runs out and the typing goes to the open menu all the same.
-            _ = item.waitForExistence(timeout: itemTimeout)
+            _ = item.waitToExist(timeout: itemTimeout)
             app.typeText(typeSelection)
             app.typeKey(.return, modifierFlags: [])
 
@@ -318,6 +488,179 @@ enum UITestApp {
             if waitUntil(timeout: wait, isChosen) { return true }
         }
         return false
+    }
+
+    /// Opens the pop-up or menu button `picker`, picks `option` from it, and returns once `isChosen`
+    /// holds: the picker's own value, read back.
+    ///
+    /// For a control that holds a value, such as a method, a scope or a behaviour, where that value is
+    /// the proof. ``chooseFromSubmenu(in:parent:item:thenAwait:reopenMenu:menuIsAlreadyOpen:attempts:menuTimeout:outcomeTimeout:)``
+    /// is for an item that opens something, and
+    /// ``chooseFromPopUp(in:menu:item:typeSelection:attempts:menuTimeout:itemTimeout:outcomeTimeout:until:)``
+    /// for a pop-up whose items should only ever be typed.
+    ///
+    /// **Not `item.click()`.** XCUITest looks a menu item up twice, once to hover it and once to
+    /// click it, and the open menu can be laid out again between the two. CI run 37147249690 hovered
+    /// "404" at y 420 and clicked y 396, the menu's first row, "Use endpoints", which was the value
+    /// the picker already had, so nothing changed and the test failed on an unchanged picker. A click
+    /// here reads the item's frame until two readings agree, then clicks that point once as an offset
+    /// from the main window, which does not move while a menu is open, so nothing is looked up again
+    /// between reading the point and clicking it.
+    ///
+    /// **The value decides.** An attempt counts only when `isChosen` holds afterwards, whatever was
+    /// clicked; a click that landed on the wrong row is retried. The last attempt uses the keyboard:
+    /// AppKit's menu type-select, the first word of the title (or `typeSelection`) and Return, which
+    /// needs no frames at all. The keyboard also stands in on any attempt whose open menu publishes no
+    /// items to click, as macOS 27 does for some pop-ups.
+    ///
+    /// **What typing costs.** If the menu did not open, the letters and the Return go to the window,
+    /// into a focused field or to a default button. `isChosen` then does not hold and the caller's
+    /// assertion fails, so a closed menu can mislead the failure message but never pass the test.
+    ///
+    /// Each attempt is a named activity holding a note of what it did, the point it clicked or the
+    /// keys it typed, so a choice that needed a second attempt is visible in the result bundle.
+    /// `menuIsAlreadyOpen` skips the first click on `picker`, for a caller that opened the menu to
+    /// assert something about its items first.
+    ///
+    /// Returns whether `isChosen` ever held, so the caller asserts with its own message.
+    @MainActor
+    @discardableResult
+    static func chooseMenuOption(
+        _ option: String,
+        in picker: XCUIElement,
+        of app: XCUIApplication,
+        typeSelection: String? = nil,
+        menuIsAlreadyOpen: Bool = false,
+        attempts: Int = 3,
+        itemTimeout: TimeInterval = 2,
+        outcomeTimeout: TimeInterval = 5,
+        until isChosen: () -> Bool
+    ) -> Bool {
+        let rounds = max(1, attempts)
+        let typed = typeSelection ?? typeSelectPrefix(of: option)
+        for attempt in 1...rounds {
+            let isLastAttempt = attempt == rounds
+            let chosen = XCTContext.runActivity(
+                named: "Choose \"\(option)\" in \(describe(picker)) (attempt \(attempt) of \(rounds))"
+            ) { _ -> Bool in
+                if attempt > 1 || !menuIsAlreadyOpen {
+                    if attempt > 1 { closeMenu(offering: option, of: picker, in: app) }
+                    guard picker.waitToExist(timeout: 5) else { return false }
+                    waitForStableFrame(picker)
+                    picker.click()
+                }
+
+                var item: XCUIElement?
+                _ = waitUntil(timeout: itemTimeout, pollInterval: 0.1) {
+                    item = openMenuItem(titled: option, in: picker, of: app)
+                    return item != nil
+                }
+                if !isLastAttempt, let item, let frame = waitForStableFrame(item) {
+                    let point = CGPoint(x: frame.midX, y: frame.midY)
+                    XCTContext.runActivity(named: "Clicked the item at \(point), read from \(frame)") { _ in }
+                    windowAnchoredCoordinate(of: point, in: app).click()
+                } else {
+                    XCTContext.runActivity(named: "Typed \"\(typed)\" and Return into the open menu") { _ in }
+                    app.typeText(typed)
+                    app.typeKey(.return, modifierFlags: [])
+                }
+                return waitUntil(timeout: isLastAttempt ? outcomeTimeout : 3, pollInterval: 0.1, isChosen)
+            }
+            if chosen { return true }
+        }
+        return false
+    }
+
+    /// A menu item matched the way AppKit actually names one: by **title**.
+    ///
+    /// `label` is not it. CI printed the element `JourneyEditorUITests` kept catching,
+    /// `MenuItem, {{6.0, 224.0}, {251.0, 24.0}}, identifier: '_restartNowRequested:', title:
+    /// 'Restart'`, and an XCUITest element description prints `label:` when there is one. There was
+    /// none. So `matching(NSPredicate(format: "label == %@", …))` matches *no* menu item in this
+    /// app, while `app.menuItems["POST"]`, a subscript, which matches identifier *or* title, has
+    /// always worked. All three attributes are asked for so neither spelling decides.
+    private static func menuItemTitled(_ option: String) -> NSPredicate {
+        NSPredicate(format: "identifier == %@ OR title == %@ OR label == %@", option, option, option)
+    }
+
+    /// One option of an open pop-up menu: the *picker's* option, never the menu bar's.
+    ///
+    /// **An open pop-up's menu lives app-wide, beside the menu bar's, not under the pop-up button.**
+    /// The branch scoped to `picker` is kept only because a match there cannot possibly be a menu-bar
+    /// item, and it costs one query when it misses.
+    ///
+    /// Which makes telling the two apart the whole job, because the menu bar's items are in the tree
+    /// whether or not their menu is open. "Restart" is the journey editor's on-completion option and
+    /// also the title of the Apple menu's `_restartNowRequested:` item. **Hittability is what
+    /// separates them**, on evidence in both directions: that Apple item failed a click with "Not
+    /// hittable" while its menu was closed, and an open pop-up's own items are clicked on every run.
+    /// A non-hittable namesake is therefore never returned; clicking the Apple menu's Restart is not
+    /// a failure a run recovers from.
+    @MainActor
+    static func openMenuItem(titled option: String, in picker: XCUIElement, of app: XCUIApplication) -> XCUIElement? {
+        let scoped = picker.descendants(matching: .menuItem).matching(menuItemTitled(option)).firstMatch
+        if scoped.exists, scoped.isHittable { return scoped }
+
+        let loose = app.menuItems.matching(menuItemTitled(option))
+        for index in 0..<loose.count {
+            let candidate = loose.element(boundBy: index)
+            if candidate.exists, candidate.isHittable { return candidate }
+        }
+        return nil
+    }
+
+    /// What the tree says about the menus on screen, for a failure that has to name what it saw.
+    ///
+    /// Bounded: the menu bar alone contributes a few hundred items, and every attribute read is a
+    /// query. Only the hittable ones are described, because those are the open menu's, the same
+    /// discriminator ``openMenuItem(titled:in:of:)`` selects on, so a failure shows exactly the set
+    /// that was searched.
+    @MainActor
+    static func describeOpenMenus(in app: XCUIApplication) -> String {
+        let items = app.menuItems
+        let total = items.count
+        var described: [String] = []
+        for index in 0..<min(total, 60) where described.count < 12 {
+            let item = items.element(boundBy: index)
+            guard item.exists, item.isHittable else { continue }
+            described.append("\"\(item.title)\"/\"\(item.label)\"")
+        }
+        let list = described.isEmpty ? "none of them hittable" : described.joined(separator: ", ")
+        return "\(app.menus.count) menus and \(total) menu items in the tree; open ones: \(list)"
+    }
+
+    /// The characters that pick `option` out of an open menu by typing.
+    ///
+    /// The first word only. An open `NSMenu` matches what has been typed against item titles as a
+    /// prefix, and a **space activates whatever is highlighted**, so typing "Strict sequence" whole
+    /// would commit on the space and type "sequence" into whatever is behind the menu. A caller whose
+    /// options share a first word passes its own `typeSelection`.
+    static func typeSelectPrefix(of option: String) -> String {
+        guard let firstWord = option.split(separator: " ").first else { return option }
+        return String(firstWord)
+    }
+
+    /// Closes the picker's menu if an earlier attempt left it open, a click that hit no row.
+    ///
+    /// Only while `option` shows the menu is open: once it has closed, Escape goes to the window and
+    /// closes the sheet the picker sits in (the hazard ``chooseFromPopUp(in:menu:item:typeSelection:attempts:menuTimeout:itemTimeout:outcomeTimeout:until:)``
+    /// records).
+    @MainActor
+    private static func closeMenu(offering option: String, of picker: XCUIElement, in app: XCUIApplication) {
+        guard openMenuItem(titled: option, in: picker, of: app) != nil else { return }
+        app.typeKey(.escape, modifierFlags: [])
+        _ = waitUntil(timeout: 2, pollInterval: 0.1) { openMenuItem(titled: option, in: picker, of: app) == nil }
+    }
+
+    /// A screen point as an offset from the app's main window. Clicking it resolves the window, which
+    /// does not move while a menu is open, instead of looking up again the item the point was read
+    /// from.
+    @MainActor
+    private static func windowAnchoredCoordinate(of point: CGPoint, in app: XCUIApplication) -> XCUICoordinate {
+        let window = app.windows.firstMatch
+        let origin = window.frame.origin
+        return window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: point.x - origin.x, dy: point.y - origin.y))
     }
 
     /// Activation is scoped to the process created by this launch. Other builds can share the
@@ -339,11 +682,22 @@ enum UITestApp {
         _ = try? event.sendEvent(options: .noReply, timeout: 2)
     }
 
+    /// How long each activation attempt watches for `isReady`. Five attempts of three seconds keep
+    /// the fifteen or so seconds the loop allowed when every probe blocked for a second of its own,
+    /// while an app that is ready is noticed within a tenth of a second.
+    static let readinessWindow: TimeInterval = 3
+
     /// Launches `app` and drives it to the foreground until `isReady` holds.
     ///
     /// Also exports the control-plane discovery override first — the environment binds at process
     /// spawn, so it must be in place before `launch()`, and it lives here so no suite can launch an
-    /// app that writes the shared `control.json`. See ``controlFileOverridePath``.
+    /// app that writes the shared `control.json`. See ``controlFileOverridePath``. CI's screen,
+    /// locale, clock, scroll bars and appearance (``UITestEnvironment``) go in here for the same
+    /// reason, and so does the lock that keeps a second run on this Mac from starting
+    /// (``UITestRunLock``).
+    ///
+    /// `isReady` should look once and return, as `assertVisible(timeout: 0)` does: it is polled.
+    /// One that waits for itself still works, but each poll then lasts as long as its own timeout.
     ///
     /// Returns whether the app became usable, so the caller can assert with its own message.
     @MainActor
@@ -353,7 +707,11 @@ enum UITestApp {
         attempts: Int = 5,
         isReady: () -> Bool
     ) -> Bool {
+        // Before anything launches: a second run's launch would end the first run's app and its
+        // reset would delete the first run's store.
+        guard UITestRunLock.acquire() else { return false }
         isolateControlPlaneDiscovery(for: app)
+        UITestEnvironment.apply(to: app)
         let existingProcesses = Set(NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
             .map(\.processIdentifier))
         app.launch()
@@ -362,23 +720,55 @@ enum UITestApp {
             launchedProcess = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
                 .first { !existingProcesses.contains($0.processIdentifier) }?.processIdentifier
             return launchedProcess != nil
-        }), let launchedProcess else { return false }
+        }), let launchedProcess else {
+            recordLaunchFailure("No new \(bundleIdentifier) process appeared within 5 s of launching", app: app)
+            return false
+        }
         activateLaunchedApp(processIdentifier: launchedProcess)
-        guard app.wait(for: .runningForeground, timeout: 15) else { return false }
+        guard app.wait(for: .runningForeground, timeout: 15) else {
+            recordLaunchFailure("The app did not reach the foreground within 15 s", app: app)
+            return false
+        }
 
         for attempt in 0..<attempts {
             if isReady() { return true }
 
             app.activate()
             activateLaunchedApp(processIdentifier: launchedProcess)
-            if attempt > 0 { reopenLaunchedApp(processIdentifier: launchedProcess) }
+            // From the first attempt. In all 162 launches in CI's logs the window became usable
+            // right after this event, which the loop used to hold back until the second attempt, so
+            // every test paid for a first attempt that never succeeded.
+            reopenLaunchedApp(processIdentifier: launchedProcess)
 
-            guard attempt < attempts - 1 else { break }
-            // Give the window server a moment before the next attempt, but stop as soon as the app is
-            // ready rather than always paying the full pause.
-            waitUntil(timeout: 0.5) { isReady() }
+            // Returns the moment the app is ready rather than always paying the full window.
+            if waitUntil(timeout: readinessWindow, pollInterval: 0.1, isReady) { return true }
+            XCTContext.runActivity(
+                named: "Launch not ready after activation attempt \(attempt + 1) of \(attempts)"
+            ) { _ in }
         }
-        return isReady()
+        if isReady() { return true }
+        recordLaunchFailure("The app never became ready in \(attempts) activation attempts", app: app)
+        return false
+    }
+
+    /// Leaves `reason` and a picture of the whole screen in the result bundle when a launch fails.
+    /// Whether a window appeared at all, or something was in front of it, is the first question a
+    /// failed launch raises, and the caller's message cannot answer it.
+    @MainActor
+    private static func recordLaunchFailure(_ reason: String, app: XCUIApplication) {
+        let state = switch app.state {
+        case .runningForeground: "running in the foreground"
+        // No `.runningBackgroundSuspended`: XCUIAutomation declares it only off macOS.
+        case .runningBackground: "running in the background"
+        case .notRunning: "not running"
+        default: "in an unknown state"
+        }
+        XCTContext.runActivity(named: "\(reason); the app is \(state)") { activity in
+            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            screenshot.name = "Screen when the launch failed"
+            screenshot.lifetime = .keepAlways
+            activity.add(screenshot)
+        }
     }
 }
 

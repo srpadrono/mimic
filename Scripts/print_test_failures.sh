@@ -85,18 +85,26 @@ echo "== $bundle"
 xcrun xcresulttool get test-results summary --path "$bundle" || true
 
 # Every failure with its message, file and line — the part the job log's tail cannot show.
+#
+# Pull requests run a failing test twice. A failed attempt of a test that passed on the other is
+# marked as such, so the failure that turned the job red is not lost among flakes;
+# `report_flaky_tests.py` lists those separately.
 xcrun xcresulttool get test-results tests --path "$bundle" \
     | python3 -c '
 import json, sys
-def walk(node, path):
+def walk(node, path, test_result=None):
     name = node.get("name") or node.get("nodeIdentifier") or ""
     here = path + [name] if name else path
-    if node.get("result") == "Failed" and node.get("nodeType") in ("Test Case", "Repetition"):
-        print(" / ".join(here), "->", node.get("result"))
-    if node.get("nodeType") == "Failure Message":
+    kind = node.get("nodeType")
+    if kind in ("Test Case", "Arguments"):
+        test_result = node.get("result")
+    if node.get("result") == "Failed" and kind in ("Test Case", "Repetition"):
+        retried = kind == "Repetition" and test_result == "Passed"
+        print(" / ".join(here), "->", "Failed, then passed on another attempt" if retried else "Failed")
+    if kind == "Failure Message":
         print("    ", name)
     for child in node.get("children", []):
-        walk(child, here)
+        walk(child, here, test_result)
 data = json.load(sys.stdin)
 for root in data.get("testNodes", []):
     walk(root, [])

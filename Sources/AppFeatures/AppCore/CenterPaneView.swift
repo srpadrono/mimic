@@ -18,9 +18,6 @@ struct CenterPaneView: View {
     var onAddEndpoint: () -> Void = {}
     var onImportHAR: () -> Void = {}
     var onImportOpenAPI: () -> Void = {}
-    /// The endpoint editor's own height, so the request log can sit right below it; `nil` while
-    /// the pane shows anything that fills the pane instead.
-    var onContentHeightChange: (CGFloat?) -> Void = { _ in }
 
     var body: some View {
         Group {
@@ -90,9 +87,6 @@ struct CenterPaneView: View {
                     onDeleteScenario: { appState.deleteScenario(endpointID: endpointID, scenarioID: $0) }
                 )
             )
-            .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded(.up) } action: { height in
-                onContentHeightChange(height)
-            }
         } else {
             Group {
                 if appState.currentProject?.endpoints.isEmpty ?? true {
@@ -110,7 +104,6 @@ struct CenterPaneView: View {
                     )
                 }
             }
-            .onAppear { onContentHeightChange(nil) }
         }
     }
 
@@ -120,15 +113,14 @@ struct CenterPaneView: View {
     private func journeyEditor(for journeyID: UUID?) -> some View {
         if let journeyID,
            let journey = appState.journeys.first(where: { $0.id == journeyID }) {
+            // No identifier here: the editor's one accessibility element is its step list, which
+            // would take this name instead of `journeyEditor.stepList` (see `JourneyEditorView.stepList`).
             JourneyEditorView(
                 model: appState,
                 journey: journey,
                 isActive: appState.activeJourney?.id == journey.id,
                 status: appState.activeJourney?.id == journey.id ? appState.activeJourneyStatus : nil
             )
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("center.journeyEditor")
-            .onAppear { onContentHeightChange(nil) }
         } else {
             DSEmptyState(
                 systemImage: NavigatorTab.journeys.systemImage,
@@ -136,7 +128,6 @@ struct CenterPaneView: View {
                 message: "Select a journey from the sidebar to script its steps, or add one to get started.",
                 identifier: "center.noJourneySelection"
             )
-            .onAppear { onContentHeightChange(nil) }
         }
     }
 }

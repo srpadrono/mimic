@@ -1,4 +1,5 @@
 import CoreGraphics
+import DesignSystem
 
 /// How much of the workspace toolbar fits over the centre column.
 ///
@@ -7,7 +8,7 @@ import CoreGraphics
 /// and divider, and the project name its subtitle, then the project name narrows, and last Run/Stop
 /// folds into the same menu. The address and the state word always stay.
 ///
-/// The last breakpoint is what the narrow tier needs: Run, the name (≤88pt), the address
+/// The last breakpoint is what the narrow tier needs: Run, the name (≤100pt), the address
 /// without its port count and the state, and "More", plus the toolbar's gaps and the column's
 /// insets. A 900pt window with both side panels open leaves about 330pt: enough for a short
 /// project name, but a longer one pushed "More" behind AppKit's own chevron there, so Run
@@ -60,18 +61,38 @@ public nonisolated enum WorkspaceToolbarLayout: Equatable, Sendable {
     /// front of the centre column's toolbar while the navigator is hidden and they sit over it.
     public static let leadingWindowChrome: CGFloat = 144
 
-    /// Whether the inspector can be open without pushing the centre column's toolbar past its
-    /// minimal tier and into AppKit's own overflow chevron, which takes the project name with it.
+    /// The narrowest the window may get, whatever is open.
     ///
-    /// Only a hidden navigator can do that: then the window's controls sit over the centre column,
-    /// and an inspector beside it leaves too little for even the minimal tier. The side panel gives
-    /// way rather than the toolbar. It is judged on the window's width, not the centre column's, so
-    /// closing the inspector cannot make room that would open it again.
+    /// A navigator at its widest and a detail column of 320pt — enough for the minimal tier's toolbar
+    /// (the identity, the address and "More") and the editor's fixed controls. A hidden navigator
+    /// leaves the window's own controls over the column, and 680pt still gives them and the minimal
+    /// tier their room. With the inspector open the window's own minimum is wider than this anyway.
+    public static let minimumWindowWidth: CGFloat = DSLayout.sidebarMaximumWidth + minimumDetailWidthBesideNavigator
+
+    /// The detail column's floor while the navigator is shown.
+    public static let minimumDetailWidthBesideNavigator: CGFloat = 320
+
+    /// Whether the inspector can be open beside the navigator and still leave the centre column room
+    /// for its editor and a toolbar that stays out of AppKit's overflow chevron.
+    ///
+    /// With the navigator hidden the window's own controls sit over the centre column, so the column
+    /// needs the minimal tier and those controls. Beside a navigator it needs
+    /// ``minimumDetailWidthBesideNavigator`` once the navigator has given up all it can, down to its
+    /// own minimum. Without room the side panel gives way rather than the toolbar, and comes back when
+    /// the window widens. Opening it in a window too narrow used to push the navigator off the
+    /// window's leading edge, because the window does not grow for it.
+    ///
+    /// Judged on the window's width and the panels' fixed sizes rather than on anything measured
+    /// inside the window, so neither closing the inspector nor the navigator giving way to it can make
+    /// room that would flip the answer back.
     public static func leavesRoomForInspector(
         windowWidth: CGFloat, inspectorWidth: CGFloat, isNavigatorHidden: Bool
     ) -> Bool {
-        guard isNavigatorHidden, windowWidth.isFinite else { return true }
-        return windowWidth - inspectorWidth >= minimalCenterWidth + leadingWindowChrome
+        guard windowWidth.isFinite else { return true }
+        if isNavigatorHidden {
+            return windowWidth - inspectorWidth >= minimalCenterWidth + leadingWindowChrome
+        }
+        return windowWidth - DSLayout.sidebarMinimumWidth - inspectorWidth >= minimumDetailWidthBesideNavigator
     }
 
     /// The project identity's widest extent at each stage, so the centre column's items fit its section.
@@ -79,7 +100,19 @@ public nonisolated enum WorkspaceToolbarLayout: Equatable, Sendable {
         switch self {
         case .expanded, .overflow: 220
         case .compactSummary: 140
-        case .narrow, .minimal: 88
+        case .narrow, .minimal: 100
+        }
+    }
+
+    /// Names the stage in the ids of the toolbar items whose width depends on it, so each stage gets
+    /// toolbar items of its own; see `WorkspaceToolbar.body`.
+    public var itemKey: String {
+        switch self {
+        case .expanded: "expanded"
+        case .compactSummary: "compactSummary"
+        case .overflow: "overflow"
+        case .narrow: "narrow"
+        case .minimal: "minimal"
         }
     }
 }

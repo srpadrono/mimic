@@ -60,6 +60,21 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The window keeps a usable minimum width with the inspector hidden or a request open. It could
+  shrink until the editor disappeared and the toolbar went into the overflow menu.
+- The request log stays where you put it. Selecting an endpoint, switching between Body and Headers,
+  or switching between Endpoints and Journeys no longer moves, opens or closes it.
+- The response body and headers fill the space down to the request log, and grow when it is hidden.
+- Hiding the request log no longer leaves a strip at the bottom of the editor.
+- The journey editor scrolls as one, so a short pane no longer cuts its settings in half.
+- The inspector comes back at the width you dragged it to, and its title lines up with its content.
+- The project name in the toolbar is no longer cut short when there is room for it.
+- Request detail lines its values up in one column, and the Timing tab no longer cuts "Response
+  headers" short. A narrow window shows the open request on its own instead of clipping it.
+- "When unmatched" fits on one line, and the endpoint and journey editors use the same side margin.
+- The welcome window opens at its own size, and the workspace gets its frame back when a project
+  opens.
+- The body editor no longer shows a scroll bar when its text fits.
 - An editor taller than its pane no longer slides its header under the jump bar when the request
   log is dragged tall; the editor's bottom is clipped instead.
 - The first-endpoint chooser drops to two cards, or one, when its pane narrows, instead of keeping

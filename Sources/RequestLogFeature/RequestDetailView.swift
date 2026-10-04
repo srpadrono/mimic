@@ -58,9 +58,12 @@ struct RequestDetailView: View {
     @State private var copyConfirmationTask: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// The name column of Summary rows, and of header and query rows.
-    private static let summaryKeyWidth: CGFloat = 96
+    /// Where every value in the detail starts, 150pt in: Summary, Answered by and Timing facts, and
+    /// header and query pairs alike. With a 96pt fact column the two kinds of table on one tab started
+    /// their values 42pt apart, and "Response headers" was cut to "Response hea…".
     private static let pairNameWidth: CGFloat = 150
+    /// A fact's label column: the value column less the gap the fact row puts after its label.
+    private static let summaryKeyWidth: CGFloat = pairNameWidth - DSSpacing.md
     /// The vertical rhythm between the header's lines and between sections.
     private static let blockSpacing: CGFloat = 14
 

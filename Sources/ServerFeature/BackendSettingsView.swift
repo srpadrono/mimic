@@ -64,7 +64,7 @@ public struct BackendSettingsView: View {
         }
         .frame(width: DSSheetWidth.split,
                height: BackendSettingsGeometry.height(
-                   visibleScreenHeight: visibleScreenHeight ?? NSScreen.main?.visibleFrame.height ?? 900))
+                   visibleScreenHeight: visibleScreenHeight ?? ScreenMetrics.visibleHeight(of: NSScreen.main) ?? 900))
         .background(DSColors.sheet)
         .dsSheetSurface()
         .onChange(of: draft) { _, _ in clearIssue() }

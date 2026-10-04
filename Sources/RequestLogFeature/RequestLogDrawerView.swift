@@ -204,12 +204,27 @@ public struct RequestLogDrawerView: View {
                 // The list keeps the four columns that identify a call; everything else about the
                 // selected one is in the detail beside it.
                 DSDivider(identifier: "requestLog.split")
-                HStack(spacing: 0) {
-                    logList(compact: true)
-                        .frame(width: LogColumns.splitListWidth(totalWidth: width))
-                    DSDivider(axis: .vertical, identifier: "requestLog.split.detail")
+                if LogColumns.showsListBesideDetail(totalWidth: width) {
+                    HStack(spacing: 0) {
+                        logList(compact: true)
+                            .frame(width: LogColumns.splitListWidth(totalWidth: width))
+                        DSDivider(axis: .vertical, identifier: "requestLog.split.detail")
+                        selectedRequestDetail
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    }
+                } else {
+                    // The request on its own takes the list's focus and keys, so the arrows still
+                    // step through the log and Escape brings the list back. Focus arrives through
+                    // the `onAppear` and the arrangement's `onChange` below.
+                    let displayOrder = sortedAndFilteredLogs.map(\.id)
                     selectedRequestDetail
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .focusable()
+                        .focusEffectDisabled()
+                        .focused($tableHasKeyboardFocus)
+                        .onKeyPress(keys: [.upArrow, .downArrow, .return, .escape, "a"], phases: [.down, .repeat]) { press in
+                            handleKeyPress(press, displayOrder: displayOrder, proxy: nil)
+                        }
                 }
             } else {
                 logList(compact: width < LogColumns.minimumTableWidth)
@@ -227,6 +242,22 @@ public struct RequestLogDrawerView: View {
         // the count never changes while the log keeps rotating.
         .onChange(of: requestLogs.last?.id) { _, _ in updateLogs() }
         .onChange(of: endpoints) { _, _ in updateLogs() }
+        // Opening a request hides the inspector with AppKit's own animation, so in a window about
+        // 900-1200pt wide (CI's 1024pt display, a laptop) the column starts too narrow for the list
+        // beside the request, shows the request alone, and widens into list and request most of a
+        // second later. The view holding the keys leaves with the old arrangement, SwiftUI clears
+        // its focus, and nothing gave it back: the arrows and Escape went nowhere until a row was
+        // clicked again. So hand it to whichever target replaced it, the list's or the lone
+        // request's. Here, on the stack both arrangements live in: a modifier on either one is
+        // replaced with it and never sees the change. Not while the filter field holds the keys.
+        .onChange(of: LogColumns.showsListBesideDetail(totalWidth: width)) { _, _ in
+            guard showsDetail else { return }
+            // On the next turn, once the new arrangement and its focus target are in the window.
+            Task { @MainActor in
+                guard !filterFieldIsFocused else { return }
+                tableHasKeyboardFocus = true
+            }
+        }
         .onAppear {
             updateLogs()
             // The click that opened this arrangement was a click in the table, so the arrows carry
@@ -701,7 +732,7 @@ public struct RequestLogDrawerView: View {
     private func handleKeyPress(
         _ press: KeyPress,
         displayOrder: [UUID],
-        proxy: ScrollViewProxy
+        proxy: ScrollViewProxy?
     ) -> KeyPress.Result {
         guard let key = Self.selectionKey(key: press.key, modifiers: press.modifiers),
               let result = Self.nextSelection(
@@ -720,7 +751,7 @@ public struct RequestLogDrawerView: View {
 
         // Unanimated, so the row is on screen before the next repeated key press arrives.
         if let reveal = result.reveal {
-            proxy.scrollTo(reveal)
+            proxy?.scrollTo(reveal)
         }
 
         return .handled

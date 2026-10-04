@@ -1,8 +1,8 @@
 name: macOS setup
 description: >-
-  Everything a macOS job in this repository needs before it can build: UI automation pre-authorised,
-  Tuist installed at the pinned version, its dependency cache restored, the lockfile held to the
-  commit, and the workspace generated.
+  Everything a macOS job in this repository needs before it can build: the pinned Xcode selected, UI
+  automation pre-authorised, Tuist installed at the pinned version, its dependency cache restored,
+  the lockfile held to the commit, and the workspace generated.
 
 # Why this is an action rather than six steps pasted into each build job.
 #
@@ -37,6 +37,32 @@ description: >-
 runs:
   using: composite
   steps:
+    # The runner image carries several Xcodes, and GitHub moves its default between them over a
+    # rollout of several days, so two jobs of one run could otherwise build and test with different
+    # ones. Snapshot baselines and font rasterisation follow the Xcode, so a silent switch reads as a
+    # wave of unrelated failures. `XCODE_VERSION` comes from the workflow's `env`, and the UI shard
+    # job, which does not use this action, selects the same one. A caller that sets none (CodeQL)
+    # keeps the image default.
+    #
+    # A missing folder fails here, in one line that lists what the image has, rather than later as a
+    # build or snapshot failure: moving the pin is a decision (new snapshots, new warnings), not
+    # something to fall into.
+    - name: Select the pinned Xcode
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -z "${XCODE_VERSION:-}" ]; then
+          echo "XCODE_VERSION is not set, so this job keeps the image's default Xcode."
+          exit 0
+        fi
+        app="/Applications/Xcode_${XCODE_VERSION}.app"
+        if [ ! -d "$app" ]; then
+          installed="$(printf '%s ' /Applications/Xcode*.app)"
+          echo "::error::$app is not on runner image ${ImageVersion:-unknown}. It has: $installed. Move XCODE_VERSION in .github/workflows/ci.yml to one of them, and expect to record the gallery snapshots again."
+          exit 1
+        fi
+        sudo xcode-select -s "$app"
+
     # macOS 26 and Swift 6.2 are the floor: `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` and the
     # macOS 26 SDK are both required to compile at all, so the image label is load-bearing rather
     # than a preference. Printed so a green run says which Xcode produced it.
@@ -82,20 +108,25 @@ runs:
     # Tuist resolves the SPM dependencies into the workspace, so this cache is what keeps a run from
     # rebuilding Vapor and GRDB from source every time.
     #
-    # Restored by the non-UI job and the UI test-product build. They share a key, so the first run
-    # on a new `Tuist/Package.resolved` may have two concurrent misses and one duplicate save
-    # warning; later runs hit the cache. Test shards and the coverage job run no build and need
-    # neither this action nor Tuist.
-    - name: Cache Tuist dependencies
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+    # Restored by the non-UI job and the UI test-product build. Test shards and the coverage job run
+    # no build and need neither this action nor Tuist.
+    #
+    # Restored everywhere, saved only from main and the nightly (the save step below). A pull
+    # request's cache entry is readable by that pull request alone, and each one is about 700 MB, so
+    # saving them filled the repository's 10 GB and evicted the entries every run reads.
+    - name: Restore Tuist dependencies
+      id: tuist-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           ~/.cache/tuist
           Tuist/.build
         # Tuist/.build includes compiled manifests/plugins, so even fallback restores must match
         # the compiler and architecture. mise.toml also invalidates a changed Tuist version, and a
-        # vendored package's manifest is one of the manifests Tuist compiles.
-        key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.key }}-tuist-${{ hashFiles('mise.toml', 'Tuist/Package.swift', 'Tuist/Package.resolved', 'Project.swift', 'Vendor/*/Package.swift') }}
+        # vendored package's manifest is one of the manifests Tuist compiles. Project.swift is not in
+        # the key: Tuist recompiles a changed project manifest whatever is restored, and keying on it
+        # minted a new entry for every module edit.
+        key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.key }}-tuist-${{ hashFiles('mise.toml', 'Tuist/Package.swift', 'Tuist/Package.resolved', 'Vendor/*/Package.swift') }}
         restore-keys: ${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.key }}-tuist-
 
     # The macOS half of the lockfile invariant. `tuist install` is a SwiftPM resolve behind another
@@ -119,6 +150,18 @@ runs:
           exit 1
         }
         tuist generate --no-open
+
+    # After the resolve, so the entry holds what this commit's lockfile resolved. The non-UI job and
+    # the UI build share a key, so the first nightly on a new lockfile may save it twice; the second
+    # save is refused with a warning, not a failure.
+    - name: Save Tuist dependencies
+      if: github.event_name != 'pull_request' && steps.tuist-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cache/tuist
+          Tuist/.build
+        key: ${{ steps.tuist-cache.outputs.cache-primary-key }}
 
     # Tuist reports failures as an unhelpful "Error" and writes the reason to a session log the
     # runner throws away. Without this a failure here says nothing at all.

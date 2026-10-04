@@ -7,11 +7,20 @@ name: CI
 # Pull requests and pushes run only what the change can break: the `plan` job
 # (Scripts/select_tests.py) picks the unit test targets and UI shards from the files changed. The
 # account gets five macOS runners at a time, so every shard a change does not need is time the next
-# run does not queue. The full suite, the Release build and the coverage badges run nightly, and on
-# any change to build settings, this workflow or the selection itself.
+# run does not queue. The full suite and the coverage badges run nightly, and on any change to build
+# settings, this workflow or the selection script; the Release build runs nightly, on a manual full
+# run, and on a change to build settings. A push that only approves gallery snapshots keeps the UI
+# verdict its pull request's previous head earned.
+#
+# Pull requests and pushes run a failing test a second time, so one transient failure does not cost
+# an hour-long re-run; Scripts/report_flaky_tests.py names every test that needed it, on the run page
+# and in the UI suite's summary. The nightly never retries, so it still counts flakes. Every test has
+# an execution time allowance, so a hung app fails one test instead of stalling a job until it is
+# killed with no evidence.
 #
 # A manual run can ask for the full suite, or name UI tests in `only_testing` to reproduce a failure
-# on one runner, repeated until it fails with `iterations`.
+# on one runner, repeated until it fails with `iterations`. Its check runs carry other names, so a
+# focus run can never stand in for a pull request's required checks.
 
 on:
   push:
@@ -37,8 +46,17 @@ on:
 permissions:
   contents: read
 
+env:
+  # The Xcode every macOS job builds and tests with: .github/actions/macos-setup selects it for the
+  # build jobs and the UI shard job selects it itself. The folder is /Applications/Xcode_<this>.app
+  # on GitHub's macos-26 image. Moving it changes font rasterisation, so expect to record the gallery
+  # snapshots again.
+  XCODE_VERSION: "26.6"
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # The nightly has a group of its own. It shares github.ref with main's pushes, so it used to queue
+  # behind them, and a pending run in a group is replaced by the next one to arrive.
+  group: ${{ github.workflow }}-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -46,13 +64,19 @@ jobs:
     name: Plan the tests this change needs
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      # Reads whether an earlier head of this pull request passed the UI suite; see the step.
+      checks: read
 
     outputs:
       full: ${{ steps.select.outputs.full }}
       checks: ${{ steps.select.outputs.checks }}
       unit: ${{ steps.select.outputs.unit }}
+      unit_extra: ${{ steps.select.outputs.unit_extra }}
       ui: ${{ steps.select.outputs.ui }}
       ui_matrix: ${{ steps.select.outputs.ui_matrix }}
+      release: ${{ steps.select.outputs.release }}
       coverage: ${{ steps.select.outputs.coverage }}
       expected_bundles: ${{ steps.select.outputs.expected_bundles }}
 
@@ -68,16 +92,34 @@ jobs:
           REF: ${{ github.ref }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
-          PUSH_BEFORE: ${{ github.event.before }}
+          # The commit before this push: the previous head of a pull request (on a new push to it),
+          # or main before the merge.
+          BEFORE: ${{ github.event.before }}
           FULL: ${{ inputs.full }}
           ONLY_TESTING: ${{ inputs.only_testing }}
           ITERATIONS: ${{ inputs.iterations }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           args=(--event "$EVENT" --ref "$REF" --only-testing "${ONLY_TESTING:-}" --iterations "${ITERATIONS:-1}")
           case "$EVENT" in
-            pull_request) args+=(--base "$PR_BASE" --head "$PR_HEAD") ;;
-            push) args+=(--base "${PUSH_BEFORE:-}" --head "$GITHUB_SHA") ;;
+            pull_request)
+              args+=(--base "$PR_BASE" --head "$PR_HEAD")
+              # Approving gallery snapshots is a push of PNGs. When the previous head passed the UI
+              # suite, select_tests.py keeps that verdict if nothing but snapshots changed since; it
+              # checks that itself. Any doubt (no previous head, an API error) runs the UI as usual.
+              if [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "$PR_HEAD" ]; then
+                passed="$(gh api "repos/$GITHUB_REPOSITORY/commits/$BEFORE/check-runs?check_name=UI%20suite&filter=latest" \
+                  --jq '[.check_runs[] | select(.conclusion == "success")] | length' 2>/dev/null || true)"
+                case "$passed" in
+                  ''|*[!0-9]*) passed=0 ;;
+                esac
+                if [ "$passed" -gt 0 ]; then
+                  args+=(--ui-passed-at "$BEFORE")
+                fi
+              fi
+              ;;
+            push) args+=(--base "${BEFORE:-}" --head "$GITHUB_SHA") ;;
           esac
           if [ "$EVENT" = workflow_dispatch ] && [ "${FULL:-false}" = true ]; then
             args+=(--full)
@@ -92,7 +134,9 @@ jobs:
     name: Build and test (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    container: swift:6.2
+    # An exact release: a moving tag changes the compiler under an unchanged commit. 6.2 is the floor
+    # the portable modules promise; macOS builds with the newer Swift its Xcode carries.
+    container: swift:6.2.4
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -146,8 +190,14 @@ jobs:
       - name: Layout audit report self-test
         run: python3 Scripts/layout_audit_report.py --self-test
 
-      - name: Cache SwiftPM dependencies
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Flaky test reporter self-test
+        run: python3 Scripts/report_flaky_tests.py --self-test
+
+      # Restored everywhere, saved only from main and the nightly: a pull request's entry is readable
+      # by that pull request alone, and at about 1 GB each they evicted the entries every run reads.
+      - name: Restore SwiftPM dependencies
+        id: spm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .build
           key: ${{ runner.os }}-${{ steps.swift.outputs.key }}-spm-${{ hashFiles('Package.resolved', 'Package.swift') }}
@@ -155,6 +205,13 @@ jobs:
 
       - name: Build
         run: swift build --build-tests
+
+      - name: Save SwiftPM dependencies
+        if: github.event_name != 'pull_request' && steps.spm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: ${{ steps.spm-cache.outputs.cache-primary-key }}
 
       - name: Package.resolved unchanged by the build
         run: |
@@ -167,10 +224,11 @@ jobs:
       - name: Test
         run: swift test --skip-build --no-parallel
 
-  # The job name is a required status check; keep it. A change that needs no macOS checks skips it,
-  # which GitHub counts as passing.
+  # A change that needs no macOS checks skips this job, and so does a focus run. Its own name is not
+  # the required check: `macos-checks-verdict` below carries that, because a skipped job's `name:`
+  # expression is never evaluated and the check would be reported under the literal expression.
   macos-checks:
-    name: Build, unit suites, Release, CLI e2e (macOS)
+    name: macOS build, unit suites, Release and CLI e2e
     needs: plan
     if: needs.plan.outputs.checks == 'true'
     runs-on: macos-26
@@ -200,8 +258,13 @@ jobs:
         if: needs.plan.outputs.unit != 'none'
         env:
           UNIT: ${{ needs.plan.outputs.unit }}
+          # One retry on pull requests and pushes, none nightly; see the flaky test step below.
+          EXTRA: ${{ needs.plan.outputs.unit_extra }}
           # GallerySnapshotTests writes new and changed renderings here; see the upload below.
           TEST_RUNNER_MIMIC_SNAPSHOT_OUTPUT: ${{ github.workspace }}/.artifacts/snapshots
+          # The design fidelity report takes two and a half minutes and gates nothing, so it runs on
+          # full runs only, which upload it. Empty, the test skips itself.
+          TEST_RUNNER_MIMIC_FIDELITY_REPORT: ${{ needs.plan.outputs.full == 'true' && format('{0}/.artifacts/fidelity', github.workspace) || '' }}
         run: |
           rm -rf .artifacts/coverage
           mkdir -p .artifacts/coverage
@@ -212,14 +275,34 @@ jobs:
             selection="$UNIT"
           fi
           echo "Unit selection: $selection"
-          # $selection is unquoted on purpose: it is several -only-testing: flags.
+          # $selection and $EXTRA are unquoted on purpose: each is several flags. The allowances fail
+          # a hung test after five minutes (the slowest takes under three) instead of letting it run
+          # into the job's timeout.
           # shellcheck disable=SC2086
           xcodebuild -workspace Mimic.xcworkspace -scheme Mimic-Workspace \
-            test -destination 'platform=macOS' $selection \
+            test -destination 'platform=macOS' $selection $EXTRA \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 300 \
+            -maximum-test-execution-time-allowance 600 \
             -derivedDataPath "$DERIVED_DATA" \
             -enableCodeCoverage YES \
             -resultBundlePath .artifacts/coverage/UnitTests.xcresult \
             CODE_SIGN_IDENTITY=- 2>&1 | tee .artifacts/unit-tests.log
+
+      - name: Flaky tests (unit suites)
+        if: ${{ !cancelled() && needs.plan.outputs.unit != 'none' }}
+        continue-on-error: true
+        run: python3 Scripts/report_flaky_tests.py --label 'unit suites' .artifacts/coverage/UnitTests.xcresult
+
+      - name: Upload the design fidelity report
+        if: ${{ !cancelled() && needs.plan.outputs.full == 'true' && hashFiles('.artifacts/fidelity/**') != '' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fidelity-report
+          path: .artifacts/fidelity
+          retention-days: 7
+          if-no-files-found: ignore
 
       # Gallery snapshots that are new or no longer match their baseline. `publish-snapshots` puts
       # them on a git branch; approved ones are committed to Tests/DesignFidelityTests/Snapshots.
@@ -257,8 +340,11 @@ jobs:
           tar -C .artifacts/coverage -czf .artifacts/UnitTests.xcresult.tar.gz UnitTests.xcresult
           ls -lh .artifacts/UnitTests.xcresult.tar.gz
 
+      # The coverage job counts the bundles it receives and publishes nothing from an incomplete set,
+      # so a failed upload costs that night's badges, never a red check.
       - name: Upload the coverage bundle
         if: needs.plan.outputs.coverage == 'true'
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-bundle-unit
@@ -284,10 +370,12 @@ jobs:
           python3 Scripts/test_passthrough_e2e.py --app "$products/Mimic.app" --cli "$products/mimic"
 
       # The Release build has not failed on its own in the history this selection was based on, and
-      # it is the slowest step (about 22 minutes). It runs on full runs: nightly, and on any change
-      # to build settings or Tuist.
+      # it is the slowest step (15 to 23 minutes). It runs nightly, on a manual full run, and on a
+      # change to build settings, Tuist or a vendored manifest (`release_paths`), not on every full
+      # run. A change to these two steps themselves first runs on the next nightly; start a full
+      # run by hand to try it sooner.
       - name: Build (Release)
-        if: needs.plan.outputs.full == 'true'
+        if: needs.plan.outputs.release == 'true'
         run: |
           set -o pipefail
           mkdir -p .artifacts
@@ -297,7 +385,7 @@ jobs:
             2>&1 | tee .artifacts/release-build.log
 
       - name: Release warnings (reported, never a gate)
-        if: needs.plan.outputs.full == 'true'
+        if: needs.plan.outputs.release == 'true'
         continue-on-error: true
         run: |
           warnings="$(grep -E ': warning: ' .artifacts/release-build.log \
@@ -316,8 +404,10 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # `cancelled()` too: a job that runs into its timeout is cancelled, not failed, and that is
+      # exactly the run whose evidence matters most.
       - name: Test failure details
-        if: failure()
+        if: ${{ failure() || cancelled() }}
         continue-on-error: true
         run: |
           ./Scripts/print_test_failures.sh \
@@ -327,7 +417,7 @@ jobs:
             .artifacts/coverage/*.xcresult
 
       - name: Upload test results
-        if: failure()
+        if: ${{ failure() || cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: xcresult-unit
@@ -336,6 +426,40 @@ jobs:
             .artifacts/coverage/UnitTests.xcresult
           retention-days: 7
           if-no-files-found: ignore
+
+  # A required status check, standing in for `macos-checks`: it passes when that job passed, or when
+  # the plan selected no macOS checks. It always runs, as `ui-suite` does, because GitHub leaves a
+  # skipped job's `name:` expression unevaluated, and the required check would then never report and
+  # leave the pull request blocked. A focus run's verdict carries another name, so its pass can never
+  # stand in for a pull request's macOS checks.
+  macos-checks-verdict:
+    name: ${{ inputs.only_testing && 'macOS checks (not run in a focus run)' || 'Build, unit suites, Release, CLI e2e (macOS)' }}
+    needs: [plan, macos-checks]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Verdict
+        env:
+          PLAN: ${{ needs.plan.result }}
+          WANTED: ${{ needs.plan.outputs.checks }}
+          RESULT: ${{ needs.macos-checks.result }}
+        run: |
+          set -euo pipefail
+          if [ "$PLAN" != success ]; then
+            echo "::error::The plan job did not finish ($PLAN), so nobody knows which macOS checks this change needs."
+            exit 1
+          fi
+          if [ "$WANTED" != true ]; then
+            echo "The plan selected no macOS checks for this change; its summary says why."
+            exit 0
+          fi
+          if [ "$RESULT" != success ]; then
+            echo "::error::The macOS checks job finished $RESULT. Open its 'Test failure details' step first."
+            exit 1
+          fi
+          echo "The macOS checks passed."
 
   # Artifacts need a browser or the Actions API to download. A branch is one `git fetch` away, so
   # new and changed gallery snapshots are also force-pushed to `snapshots/<branch>`, laid out as
@@ -347,6 +471,7 @@ jobs:
       ${{ !cancelled() && needs.macos-checks.outputs.snapshots == 'true' &&
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
 
@@ -401,10 +526,14 @@ jobs:
     needs: plan
     if: needs.plan.outputs.ui == 'true'
     runs-on: macos-26
-    timeout-minutes: 25
+    # The build has taken up to 19.5 minutes, and a Tuist cache miss adds several more.
+    timeout-minutes: 40
 
     env:
       DERIVED_DATA: .artifacts/DerivedData
+      # Instrumented only when the coverage badges are published (the nightly). The Mimic scheme turns
+      # coverage on by default, so NO has to be said.
+      COVERAGE: ${{ needs.plan.outputs.coverage == 'true' && 'YES' || 'NO' }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -419,18 +548,19 @@ jobs:
             build-for-testing -destination 'platform=macOS,arch=arm64' \
             -derivedDataPath "$DERIVED_DATA" \
             -testProductsPath .artifacts/MimicUITests.xctestproducts \
-            -enableCodeCoverage YES \
+            -enableCodeCoverage "$COVERAGE" \
             CODE_SIGN_IDENTITY=-
           test -d .artifacts/MimicUITests.xctestproducts
           tar -C .artifacts -czf .artifacts/MimicUITests.xctestproducts.tar.gz \
             MimicUITests.xctestproducts
 
+      # Kept three days so "Re-run failed jobs" still finds them after a weekend.
       - name: Upload UI test products
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ui-test-products
           path: .artifacts/MimicUITests.xctestproducts.tar.gz
-          retention-days: 1
+          retention-days: 3
           if-no-files-found: error
 
   macos-ui:
@@ -442,21 +572,53 @@ jobs:
     timeout-minutes: ${{ matrix.id == 99 && 120 || 30 }}
 
     # The shards, and which ones a change needs, come from Scripts/test_selection.json through the
-    # plan job. Scripts/check_ui_shards.py holds every UI test method to exactly one shard.
+    # plan job, longest first. Scripts/check_ui_shards.py holds every UI test method to exactly one
+    # shard. Each leg carries its `-only-testing:` selectors, its retry flags (`extra`; none nightly
+    # or for an audit shard, repeat-until-failure for a focus run) and its per-test `allowance`.
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.ui_matrix) }}
 
     env:
       DERIVED_DATA: .artifacts/DerivedData
+      COVERAGE: ${{ needs.plan.outputs.coverage == 'true' && 'YES' || 'NO' }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The same Xcode the products were built with (macos-setup selects it there), and the display
+      # the layouts were measured on. CI's runners have a 1024x768 display, whose visible frame is
+      # 1024x677; the UI tests pin the app to that frame on every machine, and this line is what
+      # says so when an image change moves it.
+      - name: Select the pinned Xcode and print the display
+        run: |
+          set -euo pipefail
+          app="/Applications/Xcode_${XCODE_VERSION}.app"
+          if [ ! -d "$app" ]; then
+            installed="$(printf '%s ' /Applications/Xcode*.app)"
+            echo "::error::$app is not on runner image ${ImageVersion:-unknown}. It has: $installed. Move XCODE_VERSION in .github/workflows/ci.yml to one of them."
+            exit 1
+          fi
+          sudo xcode-select -s "$app"
+          xcodebuild -version
+          echo "Runner image ${ImageVersion:-unknown}"
+          system_profiler SPDisplaysDataType | grep -E 'Resolution|UI Looks like' || true
+
       - name: Allow UI automation without an interactive prompt
         run: sudo automationmodetool enable-automationmode-without-authentication
 
+      # The artifact service drops a request now and then (ETIMEDOUT, ENOTFOUND). One more attempt
+      # costs seconds; without it the shard is red with every test unrun.
       - name: Download UI test products
+        id: products
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ui-test-products
+          path: .artifacts/download
+
+      - name: Download UI test products (second attempt)
+        if: steps.products.outcome == 'failure'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ui-test-products
@@ -468,10 +630,16 @@ jobs:
           tar -C .artifacts -xzf .artifacts/download/MimicUITests.xctestproducts.tar.gz
           test -d .artifacts/MimicUITests.xctestproducts
 
+      # A step timeout under the job's, so a hang outside any test (xcodebuild itself) still fails
+      # this step and leaves time for the diagnostics below.
       - name: Test (UI)
+        timeout-minutes: ${{ matrix.id == 99 && 110 || 25 }}
         env:
           ONLY_TESTING: ${{ matrix.only }}
           EXTRA: ${{ matrix.extra }}
+          # Seconds one test may run before XCTest fails it with a spindump: a hung app costs one
+          # test, not the shard. The shard's allowance is also the ceiling for any set in code.
+          ALLOWANCE: ${{ matrix.allowance }}
           RESULT_BUNDLE: .artifacts/ui/UITests-${{ matrix.id }}.xcresult
           BUILD_LOG: .artifacts/ui-tests-${{ matrix.id }}.log
           # LayoutAuditUITests writes its frames here (the runner reads it without the prefix).
@@ -480,17 +648,45 @@ jobs:
           set -o pipefail
           rm -rf "$RESULT_BUNDLE"
           mkdir -p .artifacts/ui
+          # $ONLY_TESTING and $EXTRA are unquoted on purpose: each is several flags.
+          # shellcheck disable=SC2086
           xcodebuild test-without-building \
             -testProductsPath .artifacts/MimicUITests.xctestproducts \
             -destination 'platform=macOS,arch=arm64' \
             $ONLY_TESTING $EXTRA \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance "$ALLOWANCE" \
+            -maximum-test-execution-time-allowance "$ALLOWANCE" \
             -derivedDataPath "$DERIVED_DATA" \
-            -enableCodeCoverage YES \
+            -enableCodeCoverage "$COVERAGE" \
             -resultBundlePath "$RESULT_BUNDLE" \
             CODE_SIGN_IDENTITY=- 2>&1 | tee "$BUILD_LOG"
 
+      # Each leg writes its flakes to a file the UI suite verdict collects, so the run's one summary
+      # lists every test that only passed on its retry.
+      - name: Flaky tests
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          NAME: ${{ matrix.name }}
+          RESULT_BUNDLE: .artifacts/ui/UITests-${{ matrix.id }}.xcresult
+          LIST: .artifacts/flaky/ui-${{ matrix.id }}.md
+        run: python3 Scripts/report_flaky_tests.py --label "$NAME" --list "$LIST" "$RESULT_BUNDLE"
+
+      - name: Upload the flaky test list
+        if: ${{ !cancelled() && hashFiles('.artifacts/flaky/*.md') != '' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: flaky-ui-${{ matrix.id }}
+          path: .artifacts/flaky
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # `cancelled()` too: a job that runs into its timeout is cancelled, not failed, and that is
+      # exactly the run whose evidence matters most.
       - name: Test failure details
-        if: failure()
+        if: ${{ failure() || cancelled() }}
         continue-on-error: true
         env:
           RESULT_BUNDLE: .artifacts/ui/UITests-${{ matrix.id }}.xcresult
@@ -502,7 +698,7 @@ jobs:
             "$DERIVED_DATA"/Logs/Test/*.xcresult
 
       - name: Upload test results
-        if: failure()
+        if: ${{ failure() || cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: xcresult-ui-${{ matrix.id }}
@@ -512,7 +708,8 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-      # The layout audit's frames, as a contact sheet: thumbnails, index.html and the summary.
+      # The layout audit's frames, as a contact sheet: thumbnails, index.html and the summary. The
+      # audit runs over several shards; publish-layout-audit merges their sheets into one.
       - name: Layout audit contact sheet
         id: audit
         if: ${{ !cancelled() && hashFiles('.artifacts/layout-audit/*/frames.jsonl') != '' }}
@@ -533,7 +730,7 @@ jobs:
         if: ${{ !cancelled() && steps.audit.outputs.ready == 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: layout-audit
+          name: layout-audit-${{ matrix.id }}
           path: |
             .artifacts/layout-audit/index.html
             .artifacts/layout-audit/summary.md
@@ -555,8 +752,11 @@ jobs:
           tar -C .artifacts/ui -czf ".artifacts/$BUNDLE_NAME.tar.gz" "$BUNDLE_NAME"
           ls -lh ".artifacts/$BUNDLE_NAME.tar.gz"
 
+      # As in the unit job: the coverage job rejects an incomplete set, so an upload that fails
+      # costs that night's badges, never a shard whose tests passed.
       - name: Upload the coverage bundle
         if: ${{ !cancelled() && needs.plan.outputs.coverage == 'true' }}
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-bundle-ui-${{ matrix.id }}
@@ -580,12 +780,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # One artifact per audit shard. Each sweep writes its own folder, so they merge without
+      # clashing, except for the index and summary each shard made of its own sweeps; those are
+      # written again below over the whole set.
       - name: Download the layout audit
         id: download
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: layout-audit
+          pattern: layout-audit-*
+          merge-multiple: true
           path: ${{ runner.temp }}/layout-audit
 
       - name: Push it to a branch
@@ -595,6 +799,13 @@ jobs:
           BRANCH: layout-audit/${{ github.head_ref || github.ref_name }}
         run: |
           set -euo pipefail
+          if ! ls "$SOURCE"/*/frames.jsonl >/dev/null 2>&1; then
+            echo "No audit shard ran in this run; nothing to publish."
+            exit 0
+          fi
+          python3 Scripts/layout_audit_report.py "$SOURCE"
+          cat "$SOURCE/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
@@ -612,15 +823,25 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # A required status check: it passes when every selected shard passed, or when the plan selected
-  # none. Shards the plan wanted that never ran are a failure, not a pass.
+  # none. Shards the plan wanted that never ran are a failure, not a pass. A focus run's verdict
+  # carries another name: one focused test passing must not read as the pull request's UI suite.
   ui-suite:
-    name: UI suite
+    name: ${{ inputs.only_testing && 'UI focus run' || 'UI suite' }}
     needs: [plan, macos-ui-build, macos-ui]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
+      - name: Collect flaky tests
+        if: needs.plan.outputs.ui == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: flaky-ui-*
+          merge-multiple: true
+          path: flaky
+
       - name: Verdict
         env:
           PLAN: ${{ needs.plan.result }}
@@ -628,12 +849,25 @@ jobs:
           RESULT: ${{ needs.macos-ui.result }}
         run: |
           set -euo pipefail
+          # Reported whatever the verdict: a flake that passed on its retry is the warning before
+          # the failure.
+          if ls flaky/*.md >/dev/null 2>&1; then
+            count="$(grep -h '^- ' flaky/*.md | wc -l | tr -d ' ')"
+            {
+              echo '### Flaky UI tests'
+              echo
+              echo "$count test(s) failed on one attempt and passed on another:"
+              echo
+              cat flaky/*.md
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning title=Flaky UI tests::$count test(s) passed only on a retry; the UI suite summary lists them."
+          fi
           if [ "$PLAN" != success ]; then
             echo "::error::The plan job did not finish ($PLAN), so nobody knows which UI tests this change needs."
             exit 1
           fi
           if [ "$WANTED" != true ]; then
-            echo "This change touches nothing a UI test covers; no shard was selected."
+            echo "The plan selected no UI shard for this change; its summary says why."
             exit 0
           fi
           echo "The selected UI shards rolled up to: $RESULT"
@@ -765,6 +999,7 @@ jobs:
     needs: [plan, coverage]
     if: ${{ always() && needs.plan.outputs.coverage == 'true' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
 

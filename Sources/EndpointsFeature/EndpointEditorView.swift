@@ -9,12 +9,9 @@ private enum EditorMetrics {
     static let delayFieldWidth: CGFloat = 92
     static let contentTypeFieldWidth: CGFloat = 120
     static let headerKeyWidth: CGFloat = 200
-    /// The least height of the body's text viewport, the part that scrolls.
+    /// The least height of the body's text viewport, the part that scrolls. Above it the body and
+    /// headers cards take whatever the pane has left, down to the request log.
     static let bodyMinHeight: CGFloat = 120
-    /// The most the body or headers card grows to fit its content; longer content scrolls inside.
-    static let bodyMaxHeight: CGFloat = 440
-    /// Enough lines to reach `bodyMaxHeight`; counting stops there.
-    static let bodyMaxLines = 40
     /// The scenario title row: as tall as the boards' Make live button, 24pt with a half-point
     /// border above and below (`.btn` is content-box).
     static let titleRowHeight: CGFloat = 25
@@ -133,8 +130,10 @@ public struct EndpointEditorView: View {
         }
         .padding(.horizontal, DSSpacing.xl)
         .padding(.vertical, DSSpacing.lg)
-        // As tall as its content, so the request log can sit right below it.
-        .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
+        // As tall as the pane: the body or headers card takes the room the request log leaves, so
+        // the log still starts right below the editor and moving or hiding the log resizes the card
+        // rather than leaving empty space under it.
+        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear { syncFromModel() }
         .onChange(of: endpoint.id) { endpointSelectionChanged() }
         .onChange(of: activeScenario?.id) { scenarioSelectionChanged() }
@@ -540,7 +539,7 @@ public struct EndpointEditorView: View {
         // it, and a short pane squeezes the body to exactly this minimum.
         DSJSONEditor(text: $responseBody, identifier: "editor.body", documentID: bodyDocumentID,
                      minimumViewportHeight: EditorMetrics.bodyMinHeight)
-            .frame(maxHeight: bodyCardHeight, alignment: .top)
+            .frame(maxHeight: .infinity, alignment: .top)
             .onChange(of: responseBody) { debounceBody() }
             .task(id: responseBody) {
                 let source = responseBody
@@ -560,11 +559,11 @@ public struct EndpointEditorView: View {
     private var headersEditor: some View {
         VStack(alignment: .leading, spacing: 0) {
             if headers.isEmpty {
+                // Centred in the card both ways, as every other empty state is.
                 Text("No custom headers")
                     .font(DSTypography.callout)
                     .foregroundStyle(DSColors.labelTertiary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, DSSpacing.xxl)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                     .accessibilityIdentifier("endpointEditor.headers.empty")
             } else {
                 ScrollView {
@@ -577,9 +576,9 @@ public struct EndpointEditorView: View {
                 }
                 .accessibilityIdentifier("endpointEditor.headers.count")
             }
-            Spacer(minLength: 0)
         }
-        .frame(minHeight: EditorMetrics.bodyMinHeight, maxHeight: headersCardHeight)
+        // The body card's extent, so switching between Body and Headers moves nothing below them.
+        .frame(minHeight: EditorMetrics.bodyMinHeight + DSJSONEditor.cardVerticalPadding, maxHeight: .infinity, alignment: .top)
         .background(DSColors.code)
         .clipShape(RoundedRectangle(cornerRadius: DSCornerRadius.card, style: .continuous))
         .overlay {
@@ -628,27 +627,6 @@ public struct EndpointEditorView: View {
     }
 
     // MARK: - Derived state
-
-    /// The body card's height: its lines plus the card's padding, between the minimum and the most
-    /// it grows before scrolling, as `DSJSONEditor.cardHeight(forLines:)` sizes the boards' cards.
-    /// Wrapped lines scroll rather than grow the card.
-    private var bodyCardHeight: CGFloat {
-        var lines = 1
-        for byte in responseBody.utf8 where byte == 0x0A {
-            lines += 1
-            if lines >= EditorMetrics.bodyMaxLines { break }
-        }
-        let viewport = DSJSONEditor.height(forLines: lines) + DSJSONEditor.cardSlack
-        return min(max(viewport, EditorMetrics.bodyMinHeight), EditorMetrics.bodyMaxHeight)
-            + DSJSONEditor.cardVerticalPadding
-    }
-
-    /// The headers card's height: one row per header, within the body card's bounds.
-    private var headersCardHeight: CGFloat {
-        let rows = CGFloat(max(headers.count, 1))
-        let content = rows * DSControlHeight.regular + (rows - 1) * DSSpacing.sm + DSSpacing.md * 2
-        return min(max(content, EditorMetrics.bodyMinHeight), EditorMetrics.bodyMaxHeight)
-    }
 
     private var canFormatBody: Bool {
         // The scanner can reject valid JSON when indentation would exceed its output budget.

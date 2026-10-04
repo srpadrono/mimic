@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 /// Where the workspace's panels were left: how big each one was, and whether it was open.
 ///
@@ -53,6 +56,7 @@ public final class PanelLayoutStore: @unchecked Sendable {
         static let requestLogHeight = "panel.requestLog.height"
         static let requestLogVisible = "panel.requestLog.visible"
         static let inspectorVisible = "panel.inspector.visible"
+        static let workspaceFrame = "window.workspace.frame"
     }
 
     /// How small a panel may get, and how much room the centre pane keeps for itself.
@@ -132,6 +136,36 @@ public final class PanelLayoutStore: @unchecked Sendable {
             )
             defaults.set(layout.isRequestLogVisible, forKey: Key.requestLogVisible)
             defaults.set(layout.isInspectorVisible, forKey: Key.inspectorVisible)
+        }
+    }
+
+    // MARK: - Workspace frame
+
+    /// The window frame the workspace was last shown at, in screen coordinates.
+    ///
+    /// The welcome screen and the workspace share one window, and the welcome screen is drawn at a
+    /// fraction of the workspace's size. The window takes the welcome screen's size while it shows,
+    /// so this is where the workspace's own frame waits — across launches too, since quitting from
+    /// the welcome screen leaves AppKit restoring the small frame.
+    public func loadWorkspaceFrame() -> CGRect? {
+        Self.lock.withLock {
+            guard let values = defaults.array(forKey: Key.workspaceFrame) as? [Double], values.count == 4 else {
+                return nil
+            }
+            let frame = CGRect(x: values[0], y: values[1], width: values[2], height: values[3])
+            guard frame.width.isFinite, frame.height.isFinite, frame.width > 0, frame.height > 0,
+                  frame.width <= Bounds.storedSizeLimit, frame.height <= Bounds.storedSizeLimit else { return nil }
+            return frame
+        }
+    }
+
+    public func saveWorkspaceFrame(_ frame: CGRect) {
+        guard frame.width.isFinite, frame.height.isFinite, frame.width > 0, frame.height > 0 else { return }
+        Self.lock.withLock {
+            defaults.set(
+                [Double(frame.minX), Double(frame.minY), Double(frame.width), Double(frame.height)],
+                forKey: Key.workspaceFrame
+            )
         }
     }
 

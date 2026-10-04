@@ -161,7 +161,7 @@ public struct JourneyStepSheet: View {
         }
         .frame(width: DSSheetWidth.form,
                height: min(DSFormMetrics.journeyStepHeight,
-                           (visibleScreenHeight ?? NSScreen.main?.visibleFrame.height
+                           (visibleScreenHeight ?? ScreenMetrics.visibleHeight(of: NSScreen.main)
                                ?? DSFormMetrics.maximumTallSheetHeight)
                                - DSFormMetrics.screenVerticalAllowance))
         .background(DSColors.sheet)

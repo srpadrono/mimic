@@ -42,6 +42,7 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
     private let defaultSecondaryThickness: CGFloat
     private let preferredPrimaryThickness: CGFloat?
     private let identifier: String
+    private let primaryAccessibilityIdentifier: String?
     private let primary: Primary
     private let secondary: Secondary
 
@@ -55,6 +56,9 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
     ///     hug it. The divider moves to it whenever it changes and the secondary pane takes the rest,
     ///     including what a window resize adds. The divider still drags; `nil` leaves it where the
     ///     person put it.
+    ///   - primaryAccessibilityIdentifier: Names the primary pane as an accessibility group exactly
+    ///     the pane's size, on an AppKit view around its content rather than on the content itself;
+    ///     see `DSNamedPaneViewController`. `nil` adds no group.
     public init(
         axis: Axis,
         isSecondaryPresented: Binding<Bool>,
@@ -64,6 +68,7 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
         defaultSecondaryThickness: CGFloat,
         preferredPrimaryThickness: CGFloat? = nil,
         identifier: String,
+        primaryAccessibilityIdentifier: String? = nil,
         @ViewBuilder primary: () -> Primary,
         @ViewBuilder secondary: () -> Secondary
     ) {
@@ -75,6 +80,7 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
         self.defaultSecondaryThickness = defaultSecondaryThickness
         self.preferredPrimaryThickness = preferredPrimaryThickness
         self.identifier = identifier
+        self.primaryAccessibilityIdentifier = primaryAccessibilityIdentifier
         self.primary = primary()
         self.secondary = secondary()
     }
@@ -90,7 +96,8 @@ public struct DSSplitPane<Primary: View, Secondary: View>: NSViewControllerRepre
             restoredSecondaryThickness: secondaryThickness,
             isSecondaryCollapsed: !isSecondaryPresented,
             preferredPrimaryThickness: preferredPrimaryThickness,
-            paneIdentifier: identifier
+            paneIdentifier: identifier,
+            primaryAccessibilityIdentifier: primaryAccessibilityIdentifier
         )
         attachCallbacks(to: controller)
         return controller
@@ -205,6 +212,9 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
 
     private let primaryHost: DSPaneViewController<Primary>
     private let secondaryHost: DSPaneViewController<Secondary>
+    /// What the primary split item holds: the hosting controller itself, or the container that names
+    /// the pane around it. Its view is the pane, so the pane's thickness is read from it.
+    private let primaryPane: NSViewController
     private let minimumPrimaryThickness: CGFloat
     private let minimumSecondaryThickness: CGFloat
     private let defaultSecondaryThickness: CGFloat
@@ -247,9 +257,17 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
         restoredSecondaryThickness: CGFloat,
         isSecondaryCollapsed: Bool,
         preferredPrimaryThickness: CGFloat?,
-        paneIdentifier: String
+        paneIdentifier: String,
+        primaryAccessibilityIdentifier: String?
     ) {
-        self.primaryHost = DSPaneViewController(rootView: primary)
+        let primaryHost = DSPaneViewController(rootView: primary)
+        self.primaryHost = primaryHost
+        if let primaryAccessibilityIdentifier {
+            self.primaryPane = DSNamedPaneViewController(content: primaryHost,
+                                                         accessibilityIdentifier: primaryAccessibilityIdentifier)
+        } else {
+            self.primaryPane = primaryHost
+        }
         self.secondaryHost = DSPaneViewController(rootView: secondary)
         self.minimumPrimaryThickness = minimumPrimaryThickness
         self.minimumSecondaryThickness = minimumSecondaryThickness
@@ -281,7 +299,7 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
         splitView.isVertical = isVerticalSplit
         splitView.setAccessibilityIdentifier("ds.splitpane.\(paneIdentifier)")
 
-        let primaryItem = NSSplitViewItem(viewController: primaryHost)
+        let primaryItem = NSSplitViewItem(viewController: primaryPane)
         primaryItem.minimumThickness = minimumPrimaryThickness
         // The pane that gives up room first when the window shrinks — it holds its size *less* firmly
         // than the secondary. What matters is the order of the two, not the numbers, and both have to
@@ -424,7 +442,7 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
         let ceiling = available - minimumSecondaryThickness - splitView.dividerThickness
         let target = min(max(preferred, minimumPrimaryThickness), ceiling)
         guard target >= minimumPrimaryThickness,
-              abs(thickness(of: primaryHost.view.frame) - target) >= 1,
+              abs(thickness(of: primaryPane.view.frame) - target) >= 1,
               fitAttempts < Self.maximumFitAttempts,
               !isChasingContent(to: target) else {
             needsFitToPreferred = false
@@ -589,6 +607,13 @@ public final class DSSplitPaneController<Primary: View, Secondary: View>: NSSpli
 /// **This class must not touch Auto Layout in its initialiser**, and the controller that installs it
 /// must guard `splitView(_:shouldHideDividerAt:)` — see the note there.
 final class DSHairlineSplitView: NSSplitView {
+    /// Whether the pane after the first divider is collapsed.
+    static func isTrailingPaneCollapsed(in splitView: NSSplitView) -> Bool {
+        let panes = splitView.arrangedSubviews
+        guard panes.count > 1 else { return false }
+        return splitView.isSubviewCollapsed(panes[1]) || panes[1].isHidden
+    }
+
     /// Wide enough to grab without hunting, and no wider than the panel padding it hides inside.
     static let bandThickness: CGFloat = 10
 
@@ -600,6 +625,11 @@ final class DSHairlineSplitView: NSSplitView {
         // AppKit would paint the whole band as divider and the window would grow a gutter.
         NSColor(DSColors.content).setFill()
         rect.fill()
+
+        // With the pane after it collapsed, the band sits at the edge with nothing to separate, and a
+        // seam there read as a strip of a panel that was meant to be gone. Drawn blank instead of
+        // hidden: hiding a divider changes the split view's layout, and that is AppKit's to decide.
+        guard !Self.isTrailingPaneCollapsed(in: self) else { return }
 
         // `DSStroke.hairline` in `DSColors.separator`, the same pairing `DSDivider` draws, so the
         // seam and every other rule in the window stay the same weight and colour.
@@ -644,5 +674,62 @@ final class DSPaneViewController<Content: View>: NSHostingController<Content> {
             view.setContentCompressionResistancePriority(.defaultLow, for: axis)
             view.setContentHuggingPriority(.defaultLow, for: axis)
         }
+    }
+}
+
+/// Names a pane for accessibility on a plain AppKit view the pane's own size, with the pane's
+/// hosting controller inside it.
+///
+/// The name cannot go on the SwiftUI content. `.accessibilityElement(children: .contain)` around
+/// content that is a single element makes no container: SwiftUI merges the modifiers into that
+/// element, and the outer identifier replaces the element's own. The centre pane holding the journey
+/// editor's one `List` is that case. The list was published as `centerPane`, the steps lost the
+/// `journeyEditor.stepList` they are found by, and nothing in the tree was the pane.
+///
+/// Nor on the hosting view. Whether an `NSHostingView` is an accessibility element itself, or hands
+/// its SwiftUI elements straight to its parent, is SwiftUI's undocumented choice, so an identifier
+/// set there may name nothing at all. A plain `NSView` that declares itself a group is AppKit's own
+/// contract: it is always in the tree, its children are its subviews' elements, whatever SwiftUI
+/// does with the hosting view, and its frame is the pane's because the split item sizes it.
+///
+/// A container *controller*, not a container view inside the hosting controller: the hosting
+/// controller has to stay in the view-controller chain for a `.sheet` in the pane to present (see
+/// `DSPaneViewController`), and as this controller's child it does.
+final class DSNamedPaneViewController: NSViewController {
+    private let content: NSViewController
+    /// Not `identifier`: `NSViewController` already has one of those, of a different type.
+    private let paneAccessibilityIdentifier: String
+
+    init(content: NSViewController, accessibilityIdentifier: String) {
+        self.content = content
+        self.paneAccessibilityIdentifier = accessibilityIdentifier
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        let pane = NSView()
+        pane.setAccessibilityElement(true)
+        pane.setAccessibilityRole(.group)
+        pane.setAccessibilityIdentifier(paneAccessibilityIdentifier)
+
+        addChild(content)
+        let hosted = content.view
+        hosted.translatesAutoresizingMaskIntoConstraints = false
+        pane.addSubview(hosted)
+        // Edge to edge, so the group's frame is the content's. The hosting view's own size
+        // preferences sit below a divider drag's priority (`DSPaneViewController.viewDidLoad`), so
+        // the split view still decides how big the pane is.
+        NSLayoutConstraint.activate([
+            hosted.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
+            hosted.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
+            hosted.topAnchor.constraint(equalTo: pane.topAnchor),
+            hosted.bottomAnchor.constraint(equalTo: pane.bottomAnchor),
+        ])
+        view = pane
     }
 }

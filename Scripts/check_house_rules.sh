@@ -12,10 +12,11 @@
 # AGENTS.md carries the current "Project rules" section. No count is written here on
 # purpose — a tally beside a list the reader can see is another hand-maintained mirror.
 #
-# bash, not zsh like the other scripts in this directory: the Linux CI job runs inside the `swift:6.2`
-# container, which ships bash and no zsh at all, and this check is meant to run there before anything
-# is compiled. Nothing beyond find/awk/grep for the same reason — it has to be able to run before the
-# toolchain is set up, because its whole value is answering in a second instead of twenty minutes.
+# bash, not zsh like the other scripts in this directory: the Linux CI job runs inside the
+# `swift:6.2.4` container, which ships bash and no zsh at all, and this check is meant to run there
+# before anything is compiled. Nothing beyond find/awk/grep for the same reason — it has to be able to
+# run before the toolchain is set up, because its whole value is answering in a second instead of
+# twenty minutes.
 # The comment stripper below is awk rather than sed, and uses nothing outside POSIX awk, so `mawk` —
 # what Debian and Ubuntu install as `awk`, and therefore what that container has — runs it.
 #
@@ -439,7 +440,7 @@ fi
 # What this deliberately does not chase is a rule split across two lines. Swift allows that too, the
 # scanner reads one line at a time, and every occurrence anybody has written here is on one line — a
 # pattern that cannot produce a false positive is worth more than one that catches every phrasing,
-# the same trade the `waitForExistence` rule below already documents.
+# the same trade the `waitForAny` rule below already documents.
 WS='[[:space:]]*'
 DOT='[[:space:]]*\.[[:space:]]*'
 
@@ -592,21 +593,59 @@ report \
     application.http.server.configuration.hostname = "\(configuredHost)"' \
     "${PRODUCTION_SOURCES[@]}"
 
-# UI tests only, and this one genuinely is: `waitForExistence` is an XCUIElement method, and no target
-# under `Tests/` so much as imports XCTest (`grep -rln 'import XCTest' Tests` returns nothing — they
-# are Swift Testing suites throughout). Widening it would add a tree the pattern cannot occur in.
+# XCTest's own waits for an element, and the predicate expectations they are built on. UI tests only,
+# and this one genuinely is: these are XCTest APIs, and no target under `Tests/` so much as imports
+# XCTest (`grep -rln 'import XCTest' Tests` returns nothing — they are Swift Testing suites
+# throughout). Widening it would add a tree the pattern cannot occur in.
+#
+# `waitForExistence(timeout:)` and `waitForNonExistence(timeout:)` poll an `existsNoRetry` predicate,
+# as an `XCTNSPredicateExpectation` does, and on Xcode 26 the first evaluation comes a second in,
+# however long the element has already been on screen. In 13 CI shard logs all 1,527 such waits made
+# their first check 1.0–1.1 s in, and 1,449 of them passed on it: about 9 s of every test. `.waitToExist(timeout:)`,
+# `.waitToDisappear(timeout:)` and `UITestApp.waitUntil` give the same answer by the same deadline and
+# look at once. A predicate expectation built by hand, or through XCTestCase's
+# `expectation(for:evaluatedWith:)`, runs on the same clock, so both spellings of it are here too.
+#
+# No allow-list: the helpers poll through `UITestApp.waitUntil` and use none of these, which is what
+# lets this be a flat ban. Two neighbours are left out on purpose. `XCTWaiter` on its own is not a
+# poll; it is only slow holding a predicate expectation, which the second arm already catches.
+# `XCUIApplication.wait(for:timeout:)` is answered from the state updates XCTest's daemon pushes, not
+# from a polled predicate, and nothing in the CI logs shows it paying the second.
+#
+# The first arm is unanchored on the left, like the sleep rule's, so a qualified call and a bare one
+# from inside an `XCUIElement` extension are caught alike; `waitToExist(` cannot match it. The last
+# arm wants a non-identifier character in front of `expectation`, so a name that merely ends in the
+# word is not a hit, and stays lower case, so neither is `keyValueObservingExpectation(for:`.
+report \
+    'House rule: XCTest'"'"'s waits make their first check a second in, however long the element has been there — use .waitToExist(timeout:), .waitToDisappear(timeout:) or UITestApp.waitUntil, which look at once and keep the same deadline. The doc comment on waitToExist in MimicUITestPages.swift has the measurement.' \
+    "(waitFor(Non)?Existence${WS}\(|XCTNSPredicateExpectation|(^|[^A-Za-z0-9_])expectation${WS}\(${WS}for${WS}:)" \
+    '' \
+    'XCTAssertTrue(sheet.nameField.waitForExistence(timeout: 3))
+    XCTAssertTrue(sheet.nameField . waitForExistence (timeout: 3))
+    XCTAssertTrue(sheet.nameField.waitForNonExistence(timeout: 3))
+    let gone = XCTest.XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: row)
+    expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: createButton)
+    self.expectation (for: NSPredicate(format: "isEnabled == true"), evaluatedWith: createButton)' \
+    "${UI_TESTS[@]}"
+
+# UI tests only, for the reason the rule above gives: `waitToExist` is the UI suite's own
+# `XCUIElement` helper.
 #
 # Both sides of the `||` must be a wait, so this describes the exact form rule 9 names and nothing
 # else. It reads one line at a time, so the same mistake split across two lines would still get past;
 # every occurrence in this suite has been written on one line, and a pattern that cannot produce a
 # false positive is worth more here than one that catches every phrasing.
+#
+# It used to name `waitForExistence`, which the rule above now bans outright. Looking at once changed
+# nothing about this mistake: the left-hand wait still runs out its whole timeout before the right is
+# looked at, so the rule moved to the helper rather than retiring.
 report \
     'House rule: this waits out the first element'"'"'s entire timeout before it ever looks at the second, so a short-lived one appears and vanishes unseen — use UITestApp.waitForAny([a, b], timeout:).' \
-    "waitForExistence${WS}\(.*\)${WS}\|\|.*waitForExistence${WS}\(" \
+    "waitToExist${WS}\(.*\)${WS}\|\|.*waitToExist${WS}\(" \
     '' \
-    'XCTAssertTrue(saving.waitForExistence(timeout: 2) || saved.waitForExistence(timeout: 2))
-    XCTAssertTrue(saving.waitForExistence (timeout: 2) || saved.waitForExistence (timeout: 2))
-    XCTAssertTrue(saving . waitForExistence(timeout: 2) || saved . waitForExistence(timeout: 2))' \
+    'XCTAssertTrue(saving.waitToExist(timeout: 2) || saved.waitToExist(timeout: 2))
+    XCTAssertTrue(saving.waitToExist (timeout: 2) || saved.waitToExist (timeout: 2))
+    XCTAssertTrue(saving . waitToExist(timeout: 2) || saved . waitToExist(timeout: 2))' \
     "${UI_TESTS[@]}"
 
 # Both test trees, and deliberately not the production one. `Task.sleep` is already excluded by the
@@ -616,9 +655,10 @@ report \
 # parameter and calls it, which is the injected seam the rule wants people to have, and a bare
 # `sleep(` pattern cannot tell that call apart from a real one.
 #
-# The single exemption in the whole file: the poll interval inside `UITestApp.waitUntil`. That one
-# sleep is what makes every other wait in the suite a poll rather than a fixed pause, so forbidding it
-# would forbid the fix. It is pinned to that exact expression rather than to the file, so a
+# The single exemption in the whole file: the poll interval inside `UITestApp.waitUntil`, the sleep it
+# falls back on when the thread's run loop has nothing to run. That one pause is what makes every other
+# wait in the suite a poll rather than a fixed pause, so forbidding it would forbid the fix. It is
+# pinned to that exact expression rather than to the file, so a
 # `Thread.sleep(forTimeInterval: 2)` added to `AppLaunchSupport.swift` tomorrow is still caught. The
 # exemption is deliberately *not* whitespace-tolerant like the rules are: an allow-list widened is an
 # exemption widened, and respacing the one line it names should have to come back through here.
@@ -631,7 +671,7 @@ report \
 # arm — the first arm is unanchored, so it already matches inside `Foundation.Thread.sleep(`, which is
 # what the third probe below pins.
 report \
-    'AGENTS.md "Project rules": tests never sleep — too short and the test is flaky, too long and every run pays for it. Poll with .waitForExistence(timeout:) or UITestApp.waitUntil, and await Task.sleep only where a debounce is the thing under test.' \
+    'AGENTS.md "Project rules": tests never sleep — too short and the test is flaky, too long and every run pays for it. Poll with .waitToExist(timeout:) or UITestApp.waitUntil, and await Task.sleep only where a debounce is the thing under test.' \
     "(Thread${DOT}sleep${WS}\(|(^|[^A-Za-z0-9_.])u?sleep${WS}\()" \
     'AppLaunchSupport\.swift:[0-9]+:.*Thread\.sleep\(forTimeInterval: pollInterval\)' \
     'Thread.sleep(forTimeInterval: 1)

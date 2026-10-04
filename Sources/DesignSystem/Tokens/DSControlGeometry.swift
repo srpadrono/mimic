@@ -36,8 +36,6 @@ nonisolated public enum DSLayout {
     public static let panelInset: CGFloat = 8
     /// Label column in the inspector's key-value rows.
     public static let inspectorLabelWidth: CGFloat = 104
-    /// Label column beside the inspector's editable fields, as the Main board draws it.
-    public static let inspectorFieldLabelWidth: CGFloat = 88
     /// Label column in sheets.
     public static let sheetLabelWidth: CGFloat = 104
     /// The method column: fits DELETE and OPTIONS in SF Mono 11.

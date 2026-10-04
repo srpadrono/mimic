@@ -19,8 +19,12 @@ import XCTest
 /// directory: a PNG per frame and one line of `frames.jsonl` with its findings.
 /// `Scripts/layout_audit_report.py` turns that folder into the contact sheet.
 ///
-/// CI's display is 1024pt wide, so there the sweep's widths are the narrowest window, the compact
-/// width (900pt) and the whole display. A wider display adds its own full width.
+/// The sizes come from the app's Debug-only Window ▸ Test commands, which work from the screen's
+/// visible frame. UI test launches pin that to CI's 1024×674pt (`UITestEnvironment`), so on every
+/// Mac the sweep's widths are the narrowest window, the compact width (900pt) and the full 1024pt.
+///
+/// The sweep steers by the panels' frames, and reads all of them from one snapshot of the window at
+/// a time (`PaneFrames`).
 final class LayoutAuditUITests: MimicUITestCase {
 
     private var recorder: LayoutAuditRecorder!
@@ -29,6 +33,14 @@ final class LayoutAuditUITests: MimicUITestCase {
     override func setUpWithError() throws {
         try super.setUpWithError()
         errors = []
+        // A sweep runs for minutes, past the 300s CI allows a UI test by default. CI has recorded
+        // sweeps of up to 496s, before the panels were read from one snapshot, and the audit shards
+        // never retry, so ten minutes left a slow runner about a hundred seconds. Fifteen still
+        // stops a hung sweep inside the test step's 25-minute limit; bring it and the shards'
+        // `allowance` back to 600 once CI has measured the faster sweep well under that. XCTest
+        // enforces it only when the run enables test timeouts, and never past the run's maximum
+        // allowance, which is the shard's.
+        executionTimeAllowance = 900
     }
 
     override func tearDownWithError() throws {
@@ -116,12 +128,12 @@ final class LayoutAuditUITests: MimicUITestCase {
         startAudit("welcome")
         launchApp()
         for size in WindowSize.allCases {
-            resize(to: size)
-            capture("welcome", size: size, panels: "-")
+            let panes = resize(to: size)
+            capture("welcome", size: size, panels: "-", after: panes)
         }
-        workspace.fillWindow()
+        resize(to: .fill)
         welcome.newProjectButton.click()
-        XCTAssertTrue(newProjectSheet.nameField.waitForExistence(timeout: 5))
+        XCTAssertTrue(newProjectSheet.nameField.waitToExist(timeout: 5))
         capture("new project sheet", size: .fill, panels: "-")
         finishAudit()
     }
@@ -142,7 +154,7 @@ final class LayoutAuditUITests: MimicUITestCase {
         startAudit("endpoints")
         launchApp()
         createProjectViaUI(name: "Storefront audit with a project name long enough to crowd the toolbar")
-        workspace.fillWindow()
+        resize(to: .fill)
         createEndpointViaUI(name: "List users", path: "/users")
         createEndpointViaUI(name: "Create order", path: "/orders", method: "POST")
         createEndpointViaUI(
@@ -151,10 +163,10 @@ final class LayoutAuditUITests: MimicUITestCase {
         )
         sweepPanels("endpoint editor")
 
-        workspace.fillWindow()
+        resize(to: .fill)
         setPanels(sidebar: true, inspector: true, log: .shown)
         workspace.addEndpointButton.click()
-        XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 5))
+        XCTAssertTrue(newEndpointSheet.nameField.waitToExist(timeout: 5))
         capture("new endpoint sheet", size: .fill, panels: "sheet")
         newEndpointSheet.cancelButton.click()
         finishAudit()
@@ -166,14 +178,15 @@ final class LayoutAuditUITests: MimicUITestCase {
         startAudit("journeys")
         launchApp()
         createProjectViaUI(name: "Journeys audit")
-        workspace.fillWindow()
+        resize(to: .fill)
         createEndpointViaUI(name: "Sign in", path: "/session", method: "POST")
         let journeys = JourneysNavigatorPage(app: app)
         journeys.tab.click()
-        XCTAssertTrue(journeys.emptyStateAddButton.waitForExistence(timeout: 5), "An empty journeys tab offers Add journey")
-        capture("journeys empty", size: .fill, panels: panelKey())
+        XCTAssertTrue(journeys.emptyStateAddButton.waitToExist(timeout: 5), "An empty journeys tab offers Add journey")
+        let empty = settle()
+        capture("journeys empty", size: .fill, panels: panelKey(empty), after: empty)
         journeys.emptyStateAddButton.click()
-        XCTAssertTrue(journeys.editorName.waitForExistence(timeout: 5), "Adding a journey opens it in the editor")
+        XCTAssertTrue(journeys.editorName.waitToExist(timeout: 5), "Adding a journey opens it in the editor")
         sweepPanels("journey editor")
         finishAudit()
     }
@@ -186,7 +199,7 @@ final class LayoutAuditUITests: MimicUITestCase {
         launchApp()
         let port = 62151
         createProjectViaUI(name: "Traffic audit", port: port)
-        workspace.fillWindow()
+        resize(to: .fill)
         createEndpointViaUI(name: "List users", path: "/users")
         workspace.toggleServer()
         XCTAssertTrue(workspace.waitForServerURL(port: port), "The server should report its base URL once running")
@@ -197,16 +210,15 @@ final class LayoutAuditUITests: MimicUITestCase {
         XCTAssertTrue(requestLogDrawer.waitForRowCount(3, timeout: 15), "The requests should reach the log")
         sweepPanels("request log")
 
-        workspace.fillWindow()
+        resize(to: .fill)
         setPanels(sidebar: true, inspector: true, log: .shown)
         requestLogDrawer.distinctRows(limit: 1).first?.click()
         XCTAssertTrue(requestDetail.waitForDetail(), "Clicking a logged request opens it in the centre column")
         for size in WindowSize.allCases {
-            resize(to: size)
+            var panes = resize(to: size)
             for sidebar in [true, false] {
-                setSidebar(sidebar)
-                settle()
-                capture("request detail", size: size, panels: panelKey())
+                panes = setSidebar(sidebar, from: panes)
+                panes = capture("request detail", size: size, panels: panelKey(panes), after: panes)
             }
         }
         finishAudit()
@@ -219,17 +231,28 @@ final class LayoutAuditUITests: MimicUITestCase {
         startAudit("round-trips")
         launchApp()
         createProjectViaUI(name: "Round trips")
-        workspace.fillWindow()
+        resize(to: .fill)
         createEndpointViaUI(name: "List users", path: "/users")
-        setPanels(sidebar: true, inspector: true, log: .shown)
-        let before = anchors()
+        // The first endpoint gives the inspector something to show, and the app brings the column in
+        // on its own a moment after the editor appears: the panel is shown by default
+        // (`PanelLayout.default`) and an empty project only held it back. ⌥⌘I is a toggle, so
+        // arranging the panels from a reading taken before the column arrives shuts it. On CI the
+        // window was read at t=10.90s, the column slid in at about 11.05s and the chord sent at
+        // 11.43s closed it, so every later trip was measured against a baseline with no inspector
+        // (run 37190636173). Wait for the column the app is bringing in, then arrange around it;
+        // the settle below lets it finish arriving. If it never comes, `setInspector` opens it.
+        let arriving = waitForPanes(timeout: 5) { $0.shown("inspector") != nil }
+        let arranged = setPanels(
+            sidebar: true, inspector: true, log: .shown, from: arriving.isReadable ? arriving : nil
+        )
+        let before = anchors(settle(after: arranged))
 
         let trips: [(String, @MainActor () -> Void)] = [
             ("switching to Journeys and back", {
                 WorkspaceShellPage(app: self.app).journeysTab.click()
                 _ = JourneysNavigatorPage(app: self.app).waitUntilVisible()
                 WorkspaceShellPage(app: self.app).endpointsTab.click()
-                _ = self.workspace.addEndpointButton.waitForExistence(timeout: 5)
+                _ = self.workspace.addEndpointButton.waitToExist(timeout: 5)
             }),
             ("hiding and showing the inspector", {
                 self.setInspector(false)
@@ -254,8 +277,8 @@ final class LayoutAuditUITests: MimicUITestCase {
         ]
         for (trip, perform) in trips {
             perform()
-            settle()
-            let after = anchors()
+            let panes = settle()
+            let after = anchors(panes)
             for (name, frame) in before {
                 guard let moved = after[name] else {
                     errors.append("After \(trip), the \(name) is gone (it was \(LayoutAudit.describe(frame)))")
@@ -267,7 +290,7 @@ final class LayoutAuditUITests: MimicUITestCase {
                     )
                 }
             }
-            capture("after \(trip)", size: .fill, panels: panelKey())
+            capture("after \(trip)", size: .fill, panels: panelKey(panes), after: panes)
         }
         finishAudit()
     }
@@ -297,112 +320,127 @@ final class LayoutAuditUITests: MimicUITestCase {
     @MainActor
     private func sweepPanels(_ state: String) {
         for size in WindowSize.allCases {
-            resize(to: size)
+            var panes = resize(to: size)
             var seen: Set<String> = []
+            // The navigator states at this size in which ⌥⌘I left the inspector shut. Whether it
+            // opens turns on the window's width, the navigator, the inspector's last width and what
+            // the project holds (`WorkspaceToolbarLayout.leavesRoomForInspector` and
+            // `WorkspaceView.canPresentInspector`), never on whether the log is shown or how tall it
+            // is, so asking again with only the log changed would wait out the same three seconds to
+            // the same answer. Forgotten as soon as the inspector does open, because closing it
+            // records a new last width.
+            var inspectorStaysShut: Set<Bool> = []
             let arrangements = size == .short ? [Self.arrangements[0]] : Self.arrangements
             for arrangement in arrangements {
-                setPanels(sidebar: arrangement.sidebar, inspector: arrangement.inspector, log: arrangement.log)
-                let key = panelKey(log: arrangement.log)
+                panes = setSidebar(arrangement.sidebar, from: panes)
+                if !arrangement.inspector || !inspectorStaysShut.contains(arrangement.sidebar) {
+                    panes = setInspector(arrangement.inspector, from: panes)
+                }
+                if panes.shown("inspector") != nil {
+                    inspectorStaysShut = []
+                } else if arrangement.inspector {
+                    inspectorStaysShut.insert(arrangement.sidebar)
+                }
+                panes = setLog(arrangement.log, from: panes)
+                let key = panelKey(panes, log: arrangement.log)
                 guard seen.insert(key).inserted else { continue }
-                capture(state, size: size, panels: key)
+                panes = capture(state, size: size, panels: key, after: panes)
             }
             // Leave the log at its usual height for the next width.
-            setLog(.shown)
-            dragLog(toHeight: 220)
+            dragLog(toHeight: 220, from: setLog(.shown, from: panes))
         }
         resize(to: .fill)
     }
 
+    /// Sets the window to one of the test sizes and returns once it and its panels stop moving.
+    ///
+    /// All four through the app's Debug-only Window ▸ Test shortcuts, fill included (⌃⌥⌘F is what
+    /// `WorkspacePage.fillWindow()` sends), so every size waits the same way: the settled reading
+    /// holds the window's frame as well as the panels'.
     @MainActor
-    private func resize(to size: WindowSize) {
-        let window = app.windows.firstMatch
-        switch size {
-        case .fill: workspace.fillWindow()
-        case .compact: app.typeKey("c", modifierFlags: [.command, .option, .control])
-        case .minimum: app.typeKey("n", modifierFlags: [.command, .option, .control])
-        case .short: app.typeKey("t", modifierFlags: [.command, .option, .control])
+    @discardableResult
+    private func resize(to size: WindowSize) -> PaneFrames {
+        let key: String = switch size {
+        case .fill: "f"
+        case .compact: "c"
+        case .minimum: "n"
+        case .short: "t"
         }
-        UITestApp.waitForStableFrame(window)
-        settle()
+        app.typeKey(key, modifierFlags: [.command, .option, .control])
+        return settle()
     }
 
     @MainActor
-    private func setPanels(sidebar: Bool, inspector: Bool, log: LogState) {
-        setSidebar(sidebar)
-        setInspector(inspector)
-        setLog(log)
+    @discardableResult
+    private func setPanels(
+        sidebar: Bool, inspector: Bool, log: LogState, from earlier: PaneFrames? = nil
+    ) -> PaneFrames {
+        var panes = setSidebar(sidebar, from: earlier)
+        panes = setInspector(inspector, from: panes)
+        return setLog(log, from: panes)
     }
 
-    private func pane(_ identifier: String) -> XCUIElement {
-        app.descendants(matching: .any).matching(identifier: identifier).firstMatch
-    }
+    // Each of these takes the reading its caller already holds, if nothing that could move a panel
+    // has happened since it was taken, and reads the window itself otherwise. Each returns the
+    // reading it leaves the window in: settled after anything it changed, or the one it started
+    // from when it changed nothing.
 
-    /// A pane's frame while it is on screen: present, wider and taller than a sliver, and inside
-    /// the window. A collapsed split view column can stay in the tree at zero width or off screen.
+    /// The navigator, through the split view's own toolbar toggle, the one way the app offers.
+    ///
+    /// The app adopts no `SidebarCommands`, so View has no Show Sidebar item to carry ⌃⌘S. The
+    /// menu-and-shortcut fallback this used to try found no such item on CI and moved the navigator
+    /// in none of its 93 attempts there, at about eleven seconds each. So a toggle that is not
+    /// hittable yet is waited for instead, and one that never is gives up quietly, as the inspector
+    /// does; `panelKey` records what was reached.
     @MainActor
-    private func shownFrame(_ identifier: String) -> CGRect? {
-        let element = pane(identifier)
-        guard element.exists, let frame = (try? element.snapshot())?.frame else { return nil }
-        let window = app.windows.firstMatch.frame
-        let visible = frame.intersection(window)
-        guard !visible.isNull, visible.width > 20, visible.height > 20 else { return nil }
-        return frame
-    }
-
-    @MainActor
-    private func setSidebar(_ shown: Bool) {
-        guard (shownFrame("sidebar") != nil) != shown else { return }
-        let title = shown ? "Show Sidebar" : "Hide Sidebar"
-        let button = app.toolbars.buttons[title].firstMatch
-        if button.exists, button.isHittable {
-            button.click()
-        } else {
-            app.menuBars.menuBarItems["View"].click()
-            let item = app.menuItems[title].firstMatch
-            if item.waitForExistence(timeout: 2) {
-                item.click()
-            } else {
-                UITestApp.dismissAnyOpenMenu(in: app)
-                app.typeKey("s", modifierFlags: [.control, .command])
-            }
-        }
-        _ = UITestApp.waitUntil(timeout: 5) { (self.shownFrame("sidebar") != nil) == shown }
-        settle()
+    @discardableResult
+    private func setSidebar(_ shown: Bool, from earlier: PaneFrames? = nil) -> PaneFrames {
+        let panes = earlier ?? readPanes()
+        guard (panes.shown("sidebar") != nil) != shown else { return panes }
+        let toggle = app.toolbars.buttons[shown ? "Show Sidebar" : "Hide Sidebar"].firstMatch
+        guard UITestApp.waitUntil(timeout: 2, pollInterval: Self.pollInterval, { toggle.exists && toggle.isHittable })
+        else { return panes }
+        toggle.click()
+        return settle(after: waitForPanes(timeout: 5) { ($0.shown("sidebar") != nil) == shown })
     }
 
     /// The inspector, through View ▸ Inspector (⌥⌘I). An empty project or an open request hides it
     /// whatever is asked, so this gives up quietly; `panelKey` records what was reached.
     @MainActor
-    private func setInspector(_ shown: Bool) {
-        guard (shownFrame("inspector") != nil) != shown else { return }
+    @discardableResult
+    private func setInspector(_ shown: Bool, from earlier: PaneFrames? = nil) -> PaneFrames {
+        let panes = earlier ?? readPanes()
+        guard (panes.shown("inspector") != nil) != shown else { return panes }
         app.typeKey("i", modifierFlags: [.command, .option])
-        _ = UITestApp.waitUntil(timeout: 3) { (self.shownFrame("inspector") != nil) == shown }
-        settle()
+        return settle(after: waitForPanes(timeout: 3) { ($0.shown("inspector") != nil) == shown })
     }
 
     @MainActor
-    private func setLog(_ state: LogState) {
+    @discardableResult
+    private func setLog(_ state: LogState, from earlier: PaneFrames? = nil) -> PaneFrames {
         let shown = state != .hidden
-        if (shownFrame("drawer") != nil) != shown {
+        var panes = earlier ?? readPanes()
+        if (panes.shown("drawer") != nil) != shown {
             app.typeKey("l", modifierFlags: [.command, .option])
-            _ = UITestApp.waitUntil(timeout: 3) { (self.shownFrame("drawer") != nil) == shown }
-            settle()
+            panes = settle(after: waitForPanes(timeout: 3) { ($0.shown("drawer") != nil) == shown })
         }
         switch state {
-        case .minimum: dragLog(toHeight: 162)
-        case .maximum: dragLog(toHeight: 4000)
-        case .hidden, .shown: break
+        case .minimum: return dragLog(toHeight: 162, from: panes)
+        case .maximum: return dragLog(toHeight: 4000, from: panes)
+        case .hidden, .shown: return panes
         }
     }
 
     /// Drags the divider between the centre pane and the request log so the log is `height` tall,
     /// as far as the split view allows: its own floor below, the centre pane's floor above.
     @MainActor
-    private func dragLog(toHeight height: CGFloat) {
-        guard let current = logPaneHeight(), abs(current - height) > 4,
-              let centre = shownFrame("centerPane") else { return }
+    @discardableResult
+    private func dragLog(toHeight height: CGFloat, from earlier: PaneFrames? = nil) -> PaneFrames {
+        let panes = earlier ?? readPanes()
+        guard let current = panes.logPaneHeight, abs(current - height) > 4,
+              let centre = panes.shown("centerPane") else { return panes }
         let window = app.windows.firstMatch
-        let frame = window.frame
+        let frame = panes.window
         // The divider is the band between the centre pane and the log pane, not the log's header:
         // `drawer` is the log's content, which starts below that header.
         let dividerY = centre.maxY + Self.dividerBand / 2
@@ -413,8 +451,7 @@ final class LayoutAuditUITests: MimicUITestCase {
         let start = origin.withOffset(CGVector(dx: x, dy: dividerY - frame.minY))
         let end = origin.withOffset(CGVector(dx: x, dy: targetY - frame.minY))
         start.press(forDuration: 0.2, thenDragTo: end)
-        UITestApp.waitForStableFrame(pane("drawer"))
-        settle()
+        return settle()
     }
 
     /// `DSSplitPane` names its split view after the pair; the centre pane and the log pane share it.
@@ -431,49 +468,29 @@ final class LayoutAuditUITests: MimicUITestCase {
         return bottom - centre.maxY - dividerBand
     }
 
-    @MainActor
-    private func logPaneHeight() -> CGFloat? {
-        Self.logPaneHeight(
-            centre: shownFrame("centerPane"), split: shownFrame(Self.logSplitIdentifier), drawer: shownFrame("drawer")
-        )
-    }
-
-    /// Waits for the panes to stop moving: panel animations run after the command that starts them.
-    @MainActor
-    private func settle() {
-        // The toolbar too: AppKit lays its items out again after the panes move, and a frame taken
-        // in between shows items on top of each other that a moment later are not.
-        for identifier in ["centerPane", "drawer", "inspector", "sidebar", "toolbar.projectIdentity", "serverStatusWell.url"]
-        where pane(identifier).exists {
-            UITestApp.waitForStableFrame(pane(identifier), timeout: 1)
-        }
-    }
-
     /// The arrangement actually on screen, which is what a frame is labelled with.
-    @MainActor
-    private func panelKey(log: LogState? = nil) -> String {
+    private func panelKey(_ panes: PaneFrames, log: LogState? = nil) -> String {
         let logLabel: String
-        if let log, log == .minimum || log == .maximum, let height = logPaneHeight() {
+        if let log, log == .minimum || log == .maximum, let height = panes.logPaneHeight {
             logLabel = "log \(log.rawValue) \(LayoutAudit.format(height))pt"
         } else {
-            logLabel = shownFrame("drawer") == nil ? "no log" : "log"
+            logLabel = panes.shown("drawer") == nil ? "no log" : "log"
         }
         return [
-            shownFrame("sidebar") == nil ? "no navigator" : "navigator",
-            shownFrame("inspector") == nil ? "no inspector" : "inspector",
+            panes.shown("sidebar") == nil ? "no navigator" : "navigator",
+            panes.shown("inspector") == nil ? "no inspector" : "inspector",
             logLabel,
         ].joined(separator: ", ")
     }
 
-    @MainActor
-    private func anchors() -> [String: CGRect] {
+    private func anchors(_ panes: PaneFrames) -> [String: CGRect] {
         var result: [String: CGRect] = [:]
         let names = ["navigator": "sidebar", "centre pane": "centerPane", "inspector": "inspector",
                      "request log": "drawer", "project name": "toolbar.projectIdentity"]
         for (name, identifier) in names {
-            if let frame = shownFrame(identifier) { result[name] = frame }
+            if let frame = panes.shown(identifier) { result[name] = frame }
         }
-        if let window = (try? app.windows.firstMatch.snapshot())?.frame { result["window"] = window }
+        if panes.isReadable { result["window"] = panes.window }
         return result
     }
 
@@ -482,19 +499,138 @@ final class LayoutAuditUITests: MimicUITestCase {
             && abs(a.width - b.width) <= tolerance && abs(a.height - b.height) <= tolerance
     }
 
+    // MARK: - Reading the panels
+
+    /// What one reading records: the panels, the split view the centre pane and the log share, and
+    /// the toolbar's items, which AppKit lays out again after the panels move. A frame taken in
+    /// between shows items on top of each other that a moment later are not.
+    private static let trackedIdentifiers: Set<String> = [
+        "sidebar", "centerPane", "inspector", "drawer", logSplitIdentifier,
+        "toolbar.projectIdentity", "serverStatusWell.url", "toolbar.overflow",
+    ]
+
+    /// The pause between two readings of the window.
+    private static let pollInterval: TimeInterval = 0.15
+
+    /// Where the panels are, from one snapshot of the window.
+    ///
+    /// A snapshot carries the whole tree, so every panel comes from one accessibility round trip.
+    /// The sweep used to query each panel by identifier, several times for each panel it moved, and
+    /// on CI those queries took about 275 of the request log sweep's 424 seconds.
+    struct PaneFrames: Equatable {
+        /// The window's frame, or `.null` when the window could not be read.
+        var window: CGRect
+        /// The first element with each tracked identifier, at whatever size it is in the tree.
+        var frames: [String: CGRect]
+        /// The sheet's frame while one is up, so a capture waits for it to finish arriving too.
+        var sheet: CGRect?
+        /// The tree the frames came from, which a capture checks rather than reading the window again.
+        var snapshot: (any XCUIElementSnapshot)?
+        /// When the read began, so the two readings `settle` compares are at least a poll apart.
+        var time: Date
+
+        static var unread: PaneFrames {
+            PaneFrames(window: .null, frames: [:], sheet: nil, snapshot: nil, time: .distantPast)
+        }
+
+        var isReadable: Bool { snapshot != nil }
+
+        /// A pane's frame while it is on screen: present, wider and taller than a sliver, and inside
+        /// the window. A collapsed split view column can stay in the tree at zero width or off screen.
+        func shown(_ identifier: String) -> CGRect? {
+            guard let frame = frames[identifier] else { return nil }
+            let visible = frame.intersection(window)
+            guard !visible.isNull, visible.width > 20, visible.height > 20 else { return nil }
+            return frame
+        }
+
+        var logPaneHeight: CGFloat? {
+            LayoutAuditUITests.logPaneHeight(
+                centre: shown("centerPane"), split: shown(LayoutAuditUITests.logSplitIdentifier),
+                drawer: shown("drawer")
+            )
+        }
+
+        /// Two readings agree when the layout does. When each was taken, and its snapshot, is not layout.
+        static func == (lhs: PaneFrames, rhs: PaneFrames) -> Bool {
+            lhs.window == rhs.window && lhs.frames == rhs.frames && lhs.sheet == rhs.sheet
+        }
+    }
+
+    @MainActor
+    private func readPanes() -> PaneFrames {
+        let time = Date()
+        guard let root = try? app.windows.firstMatch.snapshot() else { return .unread }
+        var frames: [String: CGRect] = [:]
+        var sheet: CGRect?
+        // Parent before children, the order `LayoutAudit.flatten` lists them in, so an identifier
+        // that appears twice resolves to the element the rules read.
+        func visit(_ node: any XCUIElementSnapshot) {
+            if Self.trackedIdentifiers.contains(node.identifier), frames[node.identifier] == nil {
+                frames[node.identifier] = node.frame
+            }
+            if sheet == nil, node.elementType == .sheet { sheet = node.frame }
+            for child in node.children { visit(child) }
+        }
+        visit(root)
+        return PaneFrames(window: root.frame, frames: frames, sheet: sheet, snapshot: root, time: time)
+    }
+
+    /// Reads the window until `condition` holds or `timeout` passes, and returns the last reading.
+    @MainActor
+    private func waitForPanes(timeout: TimeInterval, until condition: (PaneFrames) -> Bool) -> PaneFrames {
+        var latest = PaneFrames.unread
+        _ = UITestApp.waitUntil(timeout: timeout, pollInterval: Self.pollInterval) {
+            latest = readPanes()
+            return condition(latest)
+        }
+        return latest
+    }
+
+    /// Waits for the window and its panels to stop moving, and returns the reading that showed it.
+    ///
+    /// Stopped means two readable readings a poll apart agree, within two seconds. Panel animations
+    /// run after the command that starts them, and two readings taken before one starts agree too,
+    /// which is why every toggle first waits for the state it asked for and only then settles.
+    /// `earlier`, a reading the caller already holds, counts as the first of the two; what comes
+    /// back is always a reading taken here, or `.unread` if the window could not be read at all.
+    @MainActor
+    @discardableResult
+    private func settle(after earlier: PaneFrames? = nil, timeout: TimeInterval = 2) -> PaneFrames {
+        var previous = earlier?.isReadable == true ? earlier : nil
+        var latest = PaneFrames.unread
+        _ = UITestApp.waitUntil(timeout: timeout, pollInterval: Self.pollInterval) {
+            // Readings a moment apart can agree halfway through an animation, where a fast Mac reads
+            // the window several times in the time CI reads it once.
+            if let previous, Date().timeIntervalSince(previous.time) < Self.pollInterval { return false }
+            let current = readPanes()
+            guard current.isReadable else { return false }
+            let agrees = current == previous
+            previous = current
+            latest = current
+            return agrees
+        }
+        return latest
+    }
+
     // MARK: - Capturing a frame
 
     private func startAudit(_ name: String) {
         recorder = LayoutAuditRecorder(test: name)
     }
 
+    /// Checks and records the window as it is now. `earlier`, the reading the caller left the window
+    /// in, saves a read: the tree checked is the next reading that agrees with it.
     @MainActor
-    private func capture(_ state: String, size: WindowSize, panels: String) {
+    @discardableResult
+    private func capture(
+        _ state: String, size: WindowSize, panels: String, after earlier: PaneFrames? = nil
+    ) -> PaneFrames {
         let window = app.windows.firstMatch
-        UITestApp.waitForStableFrame(window)
-        guard let snapshot = try? window.snapshot() else {
+        let panes = settle(after: earlier)
+        guard let snapshot = panes.snapshot else {
             errors.append("\(state) at \(size.rawValue): the window could not be read")
-            return
+            return panes
         }
         let tree = Self.node(from: snapshot)
         // A sheet sits over the window it belongs to, so the controls behind it would read as
@@ -526,6 +662,7 @@ final class LayoutAuditUITests: MimicUITestCase {
             attachment.lifetime = .keepAlways
             add(attachment)
         }
+        return panes
     }
 
     /// What the workspace promises at every size: its panels keep their floors, and the toolbar

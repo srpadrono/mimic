@@ -747,4 +747,84 @@ struct WorkspaceFeatureLogicTests {
         let fits = CGRect(x: 60, y: 100, width: 900, height: 600)
         #expect(WindowScreenFit.fittedFrame(fits, visible: visible, minimum: minimum) == nil)
     }
+
+    @Test("The welcome screen takes its own size, centred where the workspace was and kept on screen")
+    func welcomeFrameIsCentredAndOnScreen() {
+        let visible = CGRect(x: 0, y: 60, width: 1920, height: 990)
+        let size = CGSize(width: 880, height: 560)
+        // Centred on a 1280×988 workspace at the top left.
+        #expect(WindowRoleFrame.centredFrame(around: CGRect(x: 0, y: 62, width: 1280, height: 988),
+                                             size: size, visible: visible)
+                == CGRect(x: 200, y: 276, width: 880, height: 560))
+        // A workspace hard against the right edge keeps the welcome screen on screen.
+        #expect(WindowRoleFrame.centredFrame(around: CGRect(x: 1800, y: 62, width: 300, height: 988),
+                                             size: size, visible: visible).maxX == visible.maxX)
+        // A screen smaller than the board shrinks the window to fit it.
+        let small = CGRect(x: 0, y: 0, width: 800, height: 500)
+        #expect(WindowRoleFrame.centredFrame(around: small, size: size, visible: small) == small)
+    }
+
+    @Test("A first workspace opens wide enough for the inspector, even on a 1024pt screen")
+    func firstWorkspaceFrameLeavesRoomForTheInspector() {
+        // The welcome screen centred on CI's visible frame: a 1024×768 display under the menu bar
+        // and above the Dock, 1024×674 as `NSScreen.visibleFrame` reports it on CI's runners.
+        let visible = CGRect(x: 0, y: 63, width: 1024, height: 674)
+        let welcome = CGRect(x: 72, y: 120, width: 880, height: 560)
+        let first = WindowRoleFrame.centredFrame(around: welcome, size: WindowRoleFrame.defaultWorkspaceSize,
+                                                 visible: visible)
+        #expect(first == CGRect(x: 0, y: 63, width: 1024, height: 674))
+        // The navigator at its widest, the centre's floor beside it and the inspector at its least.
+        #expect(first.width >= 976)
+    }
+
+    @Test("A pinned screen is CI's visible frame at the top left of the real one, and never larger")
+    func pinnedScreenFrameSitsAtTheTopLeft() {
+        let pin = CGSize(width: 1024, height: 674)
+        // CI's own display: the pinned frame is its visible frame, exactly.
+        let ci = CGRect(x: 0, y: 63, width: 1024, height: 674)
+        #expect(ScreenGeometry.pinnedFrame(pin, in: ci) == ci)
+        // A 1920×1080 display under a 37pt menu bar, Dock hidden: the top left corner stays put.
+        let large = CGRect(x: 0, y: 0, width: 1920, height: 1043)
+        #expect(ScreenGeometry.pinnedFrame(pin, in: large) == CGRect(x: 0, y: 369, width: 1024, height: 674))
+        // A second display left of and above the main one keeps its own origin.
+        let secondary = CGRect(x: -1440, y: 1080, width: 1440, height: 875)
+        #expect(ScreenGeometry.pinnedFrame(pin, in: secondary)
+                == CGRect(x: -1440, y: 1281, width: 1024, height: 674))
+        // A display smaller than the pin is used whole rather than overrun.
+        let small = CGRect(x: 0, y: 60, width: 800, height: 540)
+        #expect(ScreenGeometry.pinnedFrame(pin, in: small) == small)
+    }
+
+    @Test("On a pinned screen the welcome screen and the first workspace take the frames they take on CI")
+    func pinnedScreenGivesTheWindowCIsFrames() {
+        let pin = CGSize(width: 1024, height: 674)
+        let ci = CGRect(x: 0, y: 63, width: 1024, height: 674)
+        let pinned = ScreenGeometry.pinnedFrame(pin, in: CGRect(x: 0, y: 0, width: 1920, height: 1043))
+        let welcomeSize = CGSize(width: 880, height: 560)
+        // A UI test window starts at the whole pinned frame, and the welcome screen centres in it.
+        // 674pt centres the 560pt board on a whole point, so nothing is rounded on either.
+        let welcomeOnCI = WindowRoleFrame.centredFrame(around: ci, size: welcomeSize, visible: ci)
+        let welcomePinned = WindowRoleFrame.centredFrame(around: pinned, size: welcomeSize, visible: pinned)
+        #expect(welcomeOnCI == CGRect(x: 72, y: 120, width: 880, height: 560))
+        // The same size, the same distance from the top left corner: a click aimed at a control
+        // lands on it on both.
+        #expect(welcomePinned.size == welcomeOnCI.size)
+        #expect(welcomePinned.minX - pinned.minX == welcomeOnCI.minX - ci.minX)
+        #expect(pinned.maxY - welcomePinned.maxY == ci.maxY - welcomeOnCI.maxY)
+        // The welcome screen records the pinned frame as the workspace's, and it needs no fitting,
+        // so the first project opens filling the pinned screen.
+        #expect(WindowScreenFit.fittedFrame(pinned, visible: pinned, minimum: CGSize(width: 680, height: 438)) == nil)
+    }
+
+    @Test("An open request sits beside the list only when both fit")
+    func requestDetailBesideTheListOnlyWhenBothFit() {
+        let both = LogColumns.compactMinimumTableWidth + LogColumns.splitDetailMinimum
+        #expect(LogColumns.showsListBesideDetail(totalWidth: both))
+        #expect(!LogColumns.showsListBesideDetail(totalWidth: both - 1))
+        // The compact 900pt window, its 264pt navigator and the inspector stepping aside leave about
+        // 620pt: the list still sits beside the request there.
+        #expect(LogColumns.showsListBesideDetail(totalWidth: 620))
+        #expect(!LogColumns.showsListBesideDetail(totalWidth: 488), "The narrowest window shows the request alone")
+    }
 }
+

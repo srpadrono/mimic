@@ -11,7 +11,8 @@ import SwiftUI
 /// because AppKit constrains a restored frame to the screen.
 ///
 /// Only resizes the person did not make are corrected (`inLiveResize` is false), so dragging an edge
-/// still behaves exactly as it does in any other window.
+/// still behaves exactly as it does in any other window. On a UI test launch the visible frame is
+/// the pinned screen's (``ScreenGeometry``), so the window fits CI's display on every Mac.
 struct WindowScreenFit: NSViewRepresentable {
     func makeNSView(context: Context) -> FittingView { FittingView() }
     func updateNSView(_ nsView: FittingView, context: Context) {}
@@ -46,6 +47,11 @@ struct WindowScreenFit: NSViewRepresentable {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             guard let window else { return }
+            #if DEBUG
+            // Before the fit below can move the window: AppKit would record that frame for the next
+            // launch, and in a UI test run it would be the developer's own Mimic that reopened there.
+            UITestSupport.stopFrameAutosave(window)
+            #endif
             NotificationCenter.default.addObserver(
                 self,
                 selector: #selector(windowDidResize(_:)),
@@ -61,7 +67,7 @@ struct WindowScreenFit: NSViewRepresentable {
 
         private func fitWindow() {
             guard let window, !window.inLiveResize, !window.styleMask.contains(.fullScreen),
-                  let visible = window.screen?.visibleFrame,
+                  let visible = ScreenGeometry.visibleFrame(of: window.screen),
                   let fitted = WindowScreenFit.fittedFrame(window.frame, visible: visible, minimum: minimumFrameSize(of: window))
             else { return }
             window.setFrame(fitted, display: true)

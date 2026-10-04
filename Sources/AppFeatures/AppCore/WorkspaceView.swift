@@ -17,11 +17,13 @@ struct WorkspaceView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showInspector: Bool
+    /// Whether the request log is open, on both screens.
+    ///
+    /// The journeys screen used to keep a visibility of its own that started closed, because the
+    /// design draws that screen without a log. Every switch between Endpoints and Journeys then opened
+    /// or closed the bottom panel by itself, which read as the panel jumping. One setting, the one
+    /// the person last chose, holds on both.
     @State private var showDrawer: Bool
-    /// The request log on the journeys screen, which the design draws without one. Kept apart from
-    /// `showDrawer`, the endpoints screen's persisted preference, so ⌥⌘L can still show the log
-    /// beside a journey without the endpoints screen losing its own arrangement.
-    @State private var showJourneyDrawer = false
     @State private var selectedEndpointID: UUID?
     @State private var renameEndpointTarget: Endpoint?
     @State private var editEndpointRequestTarget: Endpoint?
@@ -68,10 +70,6 @@ struct WorkspaceView: View {
     /// than every frame of a drag — so this can be persisted on change without writing `UserDefaults`
     /// at the pointer's sample rate, which is what the hand-rolled divider used to do.
     @State private var drawerHeight: CGFloat
-    /// The endpoint editor's own height. The request log sits right below it and takes the rest;
-    /// `nil` while the centre shows something that fills it.
-    @State private var centreContentHeight: CGFloat?
-
     /// Start with the narrowest fit so AppKit never overflows the identity before the first
     /// geometry measurement. Then update only when the layout tier changes during a resize.
     @State private var centerToolbarLayout: WorkspaceToolbarLayout = .minimal
@@ -126,9 +124,8 @@ struct WorkspaceView: View {
                 minimumInspectorWidth: PanelLayoutStore.Bounds.minimumInspectorWidth,
                 idealInspectorWidth: PanelLayoutStore.Bounds.idealInspectorWidth
             ),
-            isRequestLogPresented: logPresentation,
+            isRequestLogPresented: $showDrawer,
             requestLogHeight: $drawerHeight,
-            preferredCenterHeight: centreContentHeight,
             isInspectorPresented: inspectorColumnPresentation,
             // A selected request takes over the column: the log on the left, the request on the
             // right, and neither the editor nor the docked log beside them. Deselecting — Escape in
@@ -161,11 +158,7 @@ struct WorkspaceView: View {
                     onEditEndpointRequest: beginEndpointRequestEdit,
                     onAddEndpoint: { appState.showNewEndpointSheet = true },
                     onImportHAR: { showHARImport = true },
-                    onImportOpenAPI: { showOpenAPIImport = true },
-                    onContentHeightChange: { height in
-                        guard centreContentHeight != height else { return }
-                        centreContentHeight = height
-                    }
+                    onImportOpenAPI: { showOpenAPIImport = true }
                 )
                 // Re-injected because the pane is hosted: `NSHostingController` starts a new
                 // SwiftUI hierarchy, and `@Environment` does not cross that boundary. Without
@@ -192,6 +185,8 @@ struct WorkspaceView: View {
         @Bindable var appState = appState
 
         workspaceWithToolbar
+        // The window's floor, which the panels alone did not keep once the inspector was hidden.
+        .background(WindowWidthFloor(width: WorkspaceToolbarLayout.minimumWindowWidth))
         // Port conflict alert
         // `String(...)` around the port, not the bare `Int`. This first argument is a
         // `LocalizedStringKey`, so an interpolated integer is formatted for the current locale and
@@ -320,7 +315,7 @@ struct WorkspaceView: View {
                 guard let journey = appState.addJourney(name: name, capturing: logs) else { return }
                 appState.selectedJourneyID = journey.id
                 // Captured from the log, so the log stays beside the journey it fed.
-                showJourneyDrawer = true
+                showDrawer = true
                 navigatorTab = .journeys
             }
         }
@@ -423,7 +418,7 @@ struct WorkspaceView: View {
             toggleRequestLog: toggleRequestLog,
             toggleInspector: toggleInspector,
             showUnmatched: {
-                logPresentation.wrappedValue = true
+                showDrawer = true
                 showUnmatchedOnly = true
             }
         )
@@ -471,7 +466,7 @@ struct WorkspaceView: View {
             runningSince: appState.server.runningSince,
             conflictingPort: startConflictPort,
             onShowUnmatched: {
-                logPresentation.wrappedValue = true
+                showDrawer = true
                 showUnmatchedOnly = true
             },
             onShowSettings: { showBackendSettings = true },
@@ -531,23 +526,11 @@ struct WorkspaceView: View {
     }
 
     private func toggleRequestLog() {
-        logPresentation.wrappedValue.toggle()
+        showDrawer.toggle()
     }
 
-    /// Whether the request log is under the centre pane on the screen now showing.
-    private var isLogShown: Bool {
-        navigatorTab == .journeys ? showJourneyDrawer : showDrawer
-    }
-
-    /// The log's visibility for the screen now showing: the journeys screen opens without it.
-    private var logPresentation: Binding<Bool> {
-        Binding(
-            get: { isLogShown },
-            set: { visible in
-                if navigatorTab == .journeys { showJourneyDrawer = visible } else { showDrawer = visible }
-            }
-        )
-    }
+    /// Whether the request log is under the centre pane.
+    private var isLogShown: Bool { showDrawer }
 
     // MARK: - Breadcrumb
 
@@ -850,7 +833,7 @@ struct WorkspaceView: View {
                 // Appending to an existing journey shows it too. Without this, capturing eight calls
                 // into a journey you cannot see is indistinguishable from having captured nothing.
                 appState.selectedJourneyID = journey.id
-                showJourneyDrawer = true
+                showDrawer = true
                 navigatorTab = .journeys
                 // Neither line changes anything when that journey is already open, and the editor
                 // is where the new steps show, so the request gives the column back explicitly.

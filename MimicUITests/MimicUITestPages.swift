@@ -39,7 +39,7 @@ struct WelcomePage {
     private var noRecentProjectsLabelByLabel: XCUIElement { app.staticTexts["No projects yet"].firstMatch }
 
     /// All three of these poll their candidates together rather than chaining
-    /// `a.waitForExistence(t) || b.waitForExistence(t)`, which is the form rule 9 of the skill
+    /// `a.waitToExist(t) || b.waitToExist(t)`, which is the form rule 9 of the skill
     /// `mimic-ui-tests` forbids.
     ///
     /// It matters most here, because `assertVisible` is the readiness closure every test's launch
@@ -87,8 +87,13 @@ struct WelcomePage {
     /// The comma is load-bearing twice: it keeps "Twin" from matching "Twin (Copy)", and it keeps the
     /// match off the row's bare name `Text`, whose label is the name alone and which has no children
     /// for a scoped `staticTexts` query to find.
+    ///
+    /// Searched inside the list rather than the whole window: a `BEGINSWITH` over every element of
+    /// `app` is the query shape that has timed XCUITest's query engine out (see
+    /// `WorkspacePage.serverURLText(port:)`), and the rows are always the list's.
     func recentProjectRow(named name: String) -> XCUIElement {
-        app.descendants(matching: .any)
+        app.container(named: "welcome.recents.list")
+            .descendants(matching: .any)
             .matching(NSPredicate(format: "label BEGINSWITH %@", "\(name), last opened"))
             .firstMatch
     }
@@ -102,10 +107,10 @@ struct WelcomePage {
     /// Finds a recent project element by name, trying identifier then text fallback.
     func findRecentProject(named name: String) -> XCUIElement? {
         let byId = recentProjectRow(named: name)
-        if byId.waitForExistence(timeout: 5) { return byId }
+        if byId.waitToExist(timeout: 5) { return byId }
 
         let byText = recentProjectText(named: name)
-        if byText.waitForExistence(timeout: 3) { return byText }
+        if byText.waitToExist(timeout: 3) { return byText }
 
         return nil
     }
@@ -131,10 +136,14 @@ struct WorkspacePage {
     let app: XCUIApplication
 
     // Panels
-    var sidebar: XCUIElement { app.otherElements["sidebar"] }
-    var centerPane: XCUIElement { app.otherElements["centerPane"] }
-    var inspector: XCUIElement { app.otherElements["inspector"] }
-    var drawer: XCUIElement { app.otherElements["drawer"] }
+    //
+    // Matched across element types, as `WorkspaceShellPage.panel(_:)` does. The centre pane in
+    // particular is an AppKit group (`DSNamedPaneViewController`), not the SwiftUI container the
+    // other three are, so an `otherElements` query could never find it.
+    var sidebar: XCUIElement { app.container(named: "sidebar") }
+    var centerPane: XCUIElement { app.container(named: "centerPane") }
+    var inspector: XCUIElement { app.container(named: "inspector") }
+    var drawer: XCUIElement { app.container(named: "drawer") }
 
     // Sidebar empty state — query by text content since accessibility identifiers
     // on Text views inside NavigationSplitView sidebar may not propagate on macOS
@@ -194,9 +203,8 @@ struct WorkspacePage {
             serverToggleButton.click()
             return
         }
-        overflowMenu.click()
         let item = serverToggleMenuItem
-        guard item.waitForExistence(timeout: 5) else {
+        guard item.exists || UITestApp.click(overflowMenu, expecting: { item.exists }) else {
             XCTFail("More actions should lead with Run/Stop when it is folded", file: file, line: line)
             closeToolbarMenu()
             return
@@ -204,20 +212,32 @@ struct WorkspacePage {
         item.click()
     }
 
-    /// "Run" or "Stop", with the control enabled: the inline button's title, or — when folded — the
-    /// menu item's ("Run server" / "Stop server"), read with the menu open and closed again.
+    /// "Run" or "Stop", with the control enabled: the inline button's title, or, when folded, the
+    /// menu item's ("Run server" / "Stop server").
+    ///
+    /// Folded, it opens "More actions" once, reads the item while the menu stays open, and closes it
+    /// on the way out. It used to open and close the menu on every half-second poll, twenty times
+    /// for one slow answer. The menu is opened again only when it has closed by itself, or after
+    /// three seconds without the answer: an open menu is not bound to redraw an item whose title
+    /// changes while it shows, and AppKit validates the items afresh each time the menu opens.
     func waitForServerToggle(toRead title: String, timeout: TimeInterval = 10) -> Bool {
-        UITestApp.waitUntil(timeout: timeout, pollInterval: 0.5) {
-            let inline = serverToggleButton
+        let inline = serverToggleButton
+        let item = serverToggleMenuItem
+        var openedAt: Date?
+        defer { if openedAt != nil { closeToolbarMenu() } }
+        return UITestApp.waitUntil(timeout: timeout, pollInterval: 0.2) {
             if inline.exists { return inline.isEnabled && inline.label == title }
-            guard overflowMenu.exists else { return false }
-            overflowMenu.click()
-            let item = serverToggleMenuItem
-            _ = item.waitForExistence(timeout: 2)
-            let shown = item.exists ? "\(item.title) \(item.label)" : ""
-            let enabled = item.exists && item.isEnabled
-            closeToolbarMenu()
-            return enabled && shown.contains("\(title) server")
+            if let opened = openedAt, !item.exists || Date().timeIntervalSince(opened) > 3 {
+                closeToolbarMenu()
+                openedAt = nil
+            }
+            if openedAt == nil {
+                guard overflowMenu.exists else { return false }
+                UITestApp.click(overflowMenu, expecting: { item.exists }, attempts: 1, timeout: 2)
+                openedAt = Date()
+            }
+            guard item.exists else { return false }
+            return item.isEnabled && "\(item.title) \(item.label)".contains("\(title) server")
         }
     }
     var legacyServerStartButton: XCUIElement { app.buttons["serverStartButton"].firstMatch }
@@ -238,16 +258,15 @@ struct WorkspacePage {
     var toolbarJourneysButton: XCUIElement {
         app.toolbars.buttons["journeysToolbarButton"].firstMatch
     }
-    /// The Import menu.
+    /// The Import menu, inline or as the "Import" item of "More actions", which this opens when it has
+    /// to (``revealToolbarAction(_:titled:)``).
     ///
     /// Matched by identifier across element types, because a SwiftUI `Menu` in a toolbar realizes as
     /// a `MenuButton` or a `PopUpButton` depending on how it is placed and `app.buttons[…]` matches
-    /// neither. The fallback is app-wide rather than toolbar-scoped for the same reason: this item is
-    /// a member of a `ToolbarItemGroup` now, and a grouped item can surface as a child of the group
-    /// element rather than as a direct descendant of the toolbar — at which point every query here
-    /// would miss it and the failure would read as "Import does nothing".
-    var importMenuButton: XCUIElement {
-        toolbarAction("importMenuButton")
+    /// neither; and in More by its title as well, because the submenu AppKit makes of it does not
+    /// reliably keep the identifier.
+    func revealImportMenu() -> XCUIElement {
+        revealToolbarAction("importMenuButton", titled: ["Import"])
     }
     // AppKit replaces identifiers with menuAction: for nested SwiftUI Menu items. Match the
     // exact native title as a fallback; both branches still identify the same single action.
@@ -262,9 +281,14 @@ struct WorkspacePage {
     /// The request log and inspector toggles. Beside the inspector's title while the inspector is
     /// open; otherwise inline at the end of the centre column's toolbar when it is wide, or items of
     /// the "More" menu (`toolbar.overflow`) when it is narrower than 780pt. The identifier is the
-    /// same everywhere, so `toolbarAction` opens the menu first when the toggle is folded.
-    var toggleInspectorButton: XCUIElement { toolbarAction("toggleInspectorButton") }
-    var toggleDrawerButton: XCUIElement { toolbarAction("toggleDrawerButton") }
+    /// same everywhere, and ``revealToolbarAction(_:titled:)`` opens the menu first when the toggle is
+    /// folded.
+    func revealInspectorToggle() -> XCUIElement {
+        revealToolbarAction("toggleInspectorButton", titled: ["Hide inspector", "Show inspector"])
+    }
+    func revealRequestLogToggle() -> XCUIElement {
+        revealToolbarAction("toggleDrawerButton", titled: ["Hide request log", "Show request log"])
+    }
     var projectTitle: XCUIElement {
         app.descendants(matching: .any).matching(identifier: "toolbar.projectName").firstMatch
     }
@@ -306,14 +330,15 @@ struct WorkspacePage {
     var usesOverflowToolbar: Bool { overflowMenu.exists }
 
     /// Opens the "More actions" menu and waits for one of its items, so the caller can query them.
+    /// A menu that is already open is left as it is: a second click would close it.
     @discardableResult
     func openOverflowMenu(file: StaticString = #filePath, line: UInt = #line) -> Bool {
-        guard overflowMenu.waitForExistence(timeout: 5) else {
+        guard overflowMenu.waitToExist(timeout: 5) else {
             XCTFail("The compact toolbar should offer its More menu", file: file, line: line)
             return false
         }
-        overflowMenu.click()
-        return overflowAction("backend.settingsButton").waitForExistence(timeout: 5)
+        let settings = overflowAction("backend.settingsButton")
+        return settings.exists || UITestApp.click(overflowMenu, expecting: { settings.exists })
     }
 
     /// Toggles the inspector with the toolbar's own control: inline when there is room, otherwise the
@@ -328,9 +353,8 @@ struct WorkspacePage {
             inline.click()
             return
         }
-        overflowMenu.click()
         let item = overflowItem("toggleInspectorButton", titled: ["Hide inspector", "Show inspector"])
-        guard item.waitForExistence(timeout: 5) else {
+        guard item.exists || UITestApp.click(overflowMenu, expecting: { item.exists }) else {
             XCTFail("More actions should offer the inspector toggle", file: file, line: line)
             closeToolbarMenu()
             return
@@ -338,12 +362,27 @@ struct WorkspacePage {
         item.click()
     }
 
-    /// Actions stay addressable whether inline or inside the narrow-window menu.
-    func toolbarAction(_ identifier: String) -> XCUIElement {
-        let action = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
-        if action.exists { return action }
-        if overflowMenu.waitForExistence(timeout: 3) { overflowMenu.click() }
-        return action
+    /// A toolbar action wherever the centre column's width has put it: inline, or an item of the
+    /// "More actions" menu, which this opens when it has to and leaves open, for the caller to click
+    /// the item or to close with ``closeToolbarMenu()``.
+    ///
+    /// A function rather than a property because it can click. The toggles and Import used to be
+    /// properties that opened the menu when read, so reading two in a row opened it and closed it
+    /// again, a read of `isEnabled` left it open for the next line to trip over, and what a read
+    /// returned depended on how many reads came before it. Opening is idempotent here: when the menu
+    /// is already open its item is returned as it is.
+    ///
+    /// `titles` are the item's titles in the menu, for the item whose identifier AppKit does not
+    /// reliably carry (see ``overflowItem(_:titled:)``).
+    @discardableResult
+    func revealToolbarAction(_ identifier: String, titled titles: [String] = []) -> XCUIElement {
+        let item = overflowItem(identifier, titled: titles)
+        if item.exists { return item }
+        let inline = inlineToolbarAction(identifier)
+        guard UITestApp.waitForAny([inline, overflowMenu], timeout: 5) else { return inline }
+        if inline.exists { return inline }
+        UITestApp.click(overflowMenu, expecting: { item.exists })
+        return item
     }
 
     func closeToolbarMenu() {
@@ -362,21 +401,39 @@ struct WorkspacePage {
         UITestApp.waitForStableFrame(window)
     }
 
-    /// Wide enough for every tier of the workspace, or as large as the primary display allows.
+    /// The whole pinned screen, which is what Test: Fill Window gives the window on every Mac.
+    ///
+    /// It used to accept any frame 1180pt wide, or the runner's own display, so "filled" meant
+    /// 1024×674 on CI and something far larger locally, and a test could pass at a size CI never
+    /// reaches. The app now takes every size from ``UITestEnvironment/screen``, and so does this.
     private static func isFilled(_ frame: CGRect) -> Bool {
-        if frame.width >= 1180 { return true }
-        guard let visible = NSScreen.screens.first?.visibleFrame else { return false }
-        return frame.width >= visible.width - 1 && frame.height >= visible.height - 1
+        frame.width >= UITestEnvironment.screen.width - 1 && frame.height >= UITestEnvironment.screen.height - 1
     }
 
-    /// Restores a collapsed navigator. Keyed on the footer's own "+", not on any "Add endpoint":
-    /// an empty project's centre card carries the same label while the navigator is hidden.
+    /// Restores a collapsed navigator.
+    ///
+    /// Keyed on the navigator's own pane, which is there on either tab. It used to wait for the
+    /// endpoints footer's "+", which the Journeys tab does not have, so with Journeys showing it
+    /// looked for a Show Sidebar toggle that was not there and then waited five seconds for a button
+    /// that could not appear, with the navigator open the whole time.
     func showSidebarIfNeeded() {
-        let navigatorAdd = app.buttons["sidebar.addEndpointButton"].firstMatch
-        if navigatorAdd.exists { return }
+        if navigatorIsShown { return }
         let show = app.toolbars.buttons["Show Sidebar"].firstMatch
-        if show.isHittable { show.click() }
-        _ = navigatorAdd.waitForExistence(timeout: 5)
+        // Waited for rather than read once: in a toolbar still being laid out the toggle is not yet
+        // hittable, and a single read skipped the click and failed five seconds later about something
+        // else.
+        if UITestApp.waitUntil(timeout: 2, pollInterval: 0.1, { show.exists && show.isHittable }) { show.click() }
+        _ = UITestApp.waitUntil(timeout: 5, pollInterval: 0.1) { navigatorIsShown }
+    }
+
+    /// Whether the navigator is open: its pane in the tree and more than a sliver of it inside the
+    /// window, the same test the layout audit puts a pane to. A collapsed split item usually leaves
+    /// the tree, and the frame check covers one that stays at no width or outside the window.
+    var navigatorIsShown: Bool {
+        guard let pane = (try? sidebar.snapshot())?.frame,
+              let window = (try? app.windows.firstMatch.snapshot())?.frame else { return false }
+        let visible = pane.intersection(window)
+        return !visible.isNull && visible.width > 20 && visible.height > 20
     }
 
     /// The centre column's width at which the toolbar stops folding its secondary actions into
@@ -392,6 +449,33 @@ struct WorkspacePage {
         return pane.exists ? pane.frame.width + 16 : 0
     }
 
+    /// Whether the inspector is showing once the app has finished presenting or hiding it.
+    ///
+    /// The app brings the inspector in on its own, a beat after what gave it something to show:
+    /// an empty project hides it, and its first endpoint presents it about 0.3 s after the editor
+    /// appears on CI. A test that read `inspector.header` the moment the editor appeared saw no
+    /// inspector, then pressed ⌥⌘I, a toggle, and shut the one the app was opening (the layout
+    /// audit's round trips, run 37190636173), or skipped hiding one that arrived a moment later.
+    /// XCTest's waits used to cover this by never looking before a second had passed; the waits
+    /// that look at once do not, so this waits for the state itself: shown, with its frame still,
+    /// or absent on four readings 0.15 s apart, which is longer than the app takes to present it.
+    @MainActor
+    @discardableResult
+    func settledInspectorIsShown(timeout: TimeInterval = 3) -> Bool {
+        let header = app.descendants(matching: .any).matching(identifier: "inspector.header").firstMatch
+        var last: Bool?
+        var agreeing = 0
+        _ = UITestApp.waitUntil(timeout: timeout, pollInterval: 0.15) {
+            let shown = header.exists
+            agreeing = shown == last ? agreeing + 1 : 0
+            last = shown
+            return shown || agreeing >= 4
+        }
+        guard header.exists else { return false }
+        UITestApp.waitForStableFrame(header)
+        return true
+    }
+
     /// Fills the window and, when the display alone cannot give the centre column the toolbar's
     /// expanded breakpoint, hides the inspector and then the navigator until it does.
     ///
@@ -403,9 +487,10 @@ struct WorkspacePage {
         fillWindow()
         guard overflowMenu.exists else { return false }
         let inspectorHeader = app.descendants(matching: .any).matching(identifier: "inspector.header").firstMatch
-        if inspectorHeader.exists {
+        // Decided on the inspector the app settles on, not the one on screen this instant.
+        if settledInspectorIsShown() {
             app.typeKey("i", modifierFlags: [.command, .option])
-            _ = inspectorHeader.waitForNonExistence(timeout: 5)
+            _ = inspectorHeader.waitToDisappear(timeout: 5)
         }
         if UITestApp.waitUntil(timeout: 2, { !overflowMenu.exists }) { return true }
         hideSidebarIfShown()
@@ -415,15 +500,19 @@ struct WorkspacePage {
     }
 
     /// Collapses the navigator with the split view's own toolbar toggle, or View ▸ Hide Sidebar.
+    /// Keyed on the navigator's pane, like ``showSidebarIfNeeded()``, so it works on either tab.
     func hideSidebarIfShown() {
-        let navigatorAdd = app.buttons["sidebar.addEndpointButton"].firstMatch
+        guard navigatorIsShown else { return }
         let hide = app.toolbars.buttons["Hide Sidebar"].firstMatch
-        if hide.exists, hide.isHittable {
+        if UITestApp.waitUntil(timeout: 2, pollInterval: 0.1, { hide.exists && hide.isHittable }) {
             hide.click()
-        } else if navigatorAdd.exists {
-            app.menuBars.menuBarItems["View"].click()
+        } else {
+            let viewMenu = app.menuBars.menuBarItems["View"]
             let item = app.menuItems["Hide Sidebar"].firstMatch
-            if item.waitForExistence(timeout: 2) {
+            // Hittable, not merely present: a menu bar's items are in the tree while their menu is
+            // closed. Not asserted: the shortcut below is the fallback when the menu offers nothing.
+            UITestApp.click(viewMenu, expecting: { item.exists && item.isHittable })
+            if item.waitToExist(timeout: 2) {
                 item.click()
             } else {
                 UITestApp.dismissAnyOpenMenu(in: app)
@@ -431,7 +520,7 @@ struct WorkspacePage {
                 app.typeKey("s", modifierFlags: [.control, .command])
             }
         }
-        _ = navigatorAdd.waitForNonExistence(timeout: 5)
+        _ = UITestApp.waitUntil(timeout: 5, pollInterval: 0.1) { !navigatorIsShown }
     }
 
     /// Undoes `widenCentreColumnForExpandedToolbar`: brings back the navigator and the inspector.
@@ -440,10 +529,14 @@ struct WorkspacePage {
         let inspectorHeader = app.descendants(matching: .any).matching(identifier: "inspector.header").firstMatch
         if !inspectorHeader.exists {
             app.typeKey("i", modifierFlags: [.command, .option])
-            _ = inspectorHeader.waitForExistence(timeout: 5)
+            _ = inspectorHeader.waitToExist(timeout: 5)
         }
         UITestApp.waitForStableFrame(app.windows.firstMatch)
     }
+
+    /// Test: Compact Window's width, `UITestSupport.compactTestWindowWidth` in the app, spelled here
+    /// because this target links no app code.
+    static let compactWindowWidth: CGFloat = 900
 
     /// Shrinks the window to the compact test width (900pt), against the screen's right edge.
     ///
@@ -453,6 +546,11 @@ struct WorkspacePage {
     func compactWindow(file: StaticString = #filePath, line: UInt = #line) {
         let window = app.windows.firstMatch
         app.typeKey("c", modifierFlags: [.command, .option, .control])
+        // Waited for at the compact width itself first. "Under 1180pt" alone already held before the
+        // app had handled the key, because every launch's window is CI's 1024pt one, so a test could
+        // carry on at the old size. Not asserted at 900pt, so a window the app keeps wider for its
+        // panels' minimums still passes the check below as it always has, a few seconds later.
+        _ = UITestApp.waitUntil(timeout: 5) { abs(window.frame.width - Self.compactWindowWidth) <= 1 }
         XCTAssertTrue(
             UITestApp.waitUntil(timeout: 5) { window.frame.width < 1180 },
             "The window should be compact (under 1180pt) — it is \(window.frame.width)pt",
@@ -492,8 +590,9 @@ struct WorkspacePage {
     }
 
     func endpointPathText(_ path: String) -> XCUIElement {
-        // Navigator rows expose method, path and name as one accessible element.
-        app.descendants(matching: .any).matching(NSPredicate(
+        // Navigator rows expose method, path and name as one accessible element. Searched inside the
+        // navigator, which holds every row, rather than with a `CONTAINS` over the whole window.
+        sidebar.descendants(matching: .any).matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "endpoint-", " \(path), "
         )).firstMatch
     }
@@ -522,7 +621,7 @@ struct WorkspacePage {
         // AppKit can move the whole status group into native toolbar overflow on small displays.
         // Expand before asserting its visible, two-line presentation.
         if !element.exists { fillWindow() }
-        guard element.waitForExistence(timeout: timeout) else { return false }
+        guard element.waitToExist(timeout: timeout) else { return false }
         return UITestApp.waitUntil(timeout: timeout) {
             let shown = ((element.value as? String) ?? "") + " " + element.label
             return shown.contains("localhost:\(port)") && shown.contains("server running")
@@ -532,7 +631,7 @@ struct WorkspacePage {
     /// Waits for the workspace to be visible — by its empty state if the project has no endpoints, by
     /// the navigator's add button if it has some.
     ///
-    /// Polled together, never `a.waitForExistence(t) || b.waitForExistence(t)`. That form waits out
+    /// Polled together, never `a.waitToExist(t) || b.waitToExist(t)`. That form waits out
     /// `a`'s entire timeout before it so much as looks at `b`, so reopening a project that *has* an
     /// endpoint — where the empty heading never appears — burned the full 10s on every call before
     /// succeeding on the second query.
@@ -649,19 +748,19 @@ struct EndpointEditorPage {
 
     /// Switches to the headers pane. Clicking the segment selects it; it does not toggle.
     func showHeaders(file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertTrue(headersTab.waitForExistence(timeout: 5), "The editor should offer a Headers segment",
+        XCTAssertTrue(headersTab.waitToExist(timeout: 5), "The editor should offer a Headers segment",
                       file: file, line: line)
         if !headersTab.isSelected { headersTab.click() }
-        XCTAssertTrue(addHeaderButton.waitForExistence(timeout: 5),
+        XCTAssertTrue(addHeaderButton.waitToExist(timeout: 5),
                       "The headers pane should offer Add header", file: file, line: line)
     }
 
     /// Switches back to the body pane.
     func showBody(file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertTrue(bodyTab.waitForExistence(timeout: 5), "The editor should offer a Body segment",
+        XCTAssertTrue(bodyTab.waitToExist(timeout: 5), "The editor should offer a Body segment",
                       file: file, line: line)
         if !bodyTab.isSelected { bodyTab.click() }
-        XCTAssertTrue(prettyPrintButton.waitForExistence(timeout: 5),
+        XCTAssertTrue(prettyPrintButton.waitToExist(timeout: 5),
                       "The body pane should offer Format", file: file, line: line)
     }
 
@@ -694,11 +793,14 @@ struct EndpointEditorPage {
         app.textFields["endpointEditor.headerValue.\(index)"]
     }
 
+    /// Waits for the status field to read `value`. Read through a snapshot, so a field that has not
+    /// appeared yet is one more poll rather than a failed read.
     @discardableResult
     func waitForStatusCodeValue(_ value: String, timeout: TimeInterval = 5) -> Bool {
-        let predicate = NSPredicate(format: "value == %@", value)
-        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: statusCodeField)
-        return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+        let field = statusCodeField
+        return UITestApp.waitUntil(timeout: timeout, pollInterval: 0.1) {
+            (try? field.snapshot())?.value as? String == value
+        }
     }
 }
 
@@ -774,10 +876,12 @@ struct RequestLogDrawerPage {
     /// A test cannot know a log entry's UUID — the server mints it when the request arrives — and
     /// matching on the rendered path instead would also match the sidebar and the editor, which show
     /// the same string. The prefix is the only unambiguous handle.
+    ///
+    /// Searched inside `drawer`, the log's own container docked or taking over the centre column,
+    /// rather than across the whole window: these two queries are polled, and a `BEGINSWITH` over
+    /// every element of `app` is the shape that has timed XCUITest's query engine out.
     var firstLogRow: XCUIElement {
-        app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "requestLog-"))
-            .firstMatch
+        allRowCells.firstMatch
     }
 
     /// Every element carrying a row's identifier — **several per row**, not one.
@@ -800,7 +904,7 @@ struct RequestLogDrawerPage {
     /// composed their labels; ``distinctRows(limit:)``'s dedupe is a no-op now and kept only as
     /// safety against the realization changing again.
     var allRowCells: XCUIElementQuery {
-        app.descendants(matching: .any)
+        app.container(named: "drawer").descendants(matching: .any)
             .matching(NSPredicate(format: "identifier BEGINSWITH %@", "requestLog-"))
     }
 
@@ -836,13 +940,13 @@ struct RequestLogDrawerPage {
     /// each the two counts agree today, but this helper predates that — rows used to fan out into
     /// several elements, and a single request satisfied `allRowCells.count >= 2` — and counting
     /// distinct ids is the version that stays correct whichever way the realization goes.
+    ///
+    /// Every 0.3 s rather than `waitUntil`'s default: one count reads each row it finds, so it is a
+    /// handful of queries rather than one.
     func waitForRowCount(_ count: Int, timeout: TimeInterval) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if distinctRows(limit: count).count >= count { return true }
-            _ = firstLogRow.waitForExistence(timeout: 0.3)
+        UITestApp.waitUntil(timeout: timeout, pollInterval: 0.3) {
+            distinctRows(limit: count).count >= count
         }
-        return distinctRows(limit: count).count >= count
     }
 }
 
@@ -878,13 +982,13 @@ struct RequestDetailPage {
     /// Waits for one request to be open beside the log — its path is the detail's first line.
     @discardableResult
     func waitForDetail(timeout: TimeInterval = 5) -> Bool {
-        path.waitForExistence(timeout: timeout)
+        path.waitToExist(timeout: timeout)
     }
 
     /// Waits for the several-rows state that replaces the detail.
     @discardableResult
     func waitForMultipleSelection(timeout: TimeInterval = 5) -> Bool {
-        multipleRequests.waitForExistence(timeout: timeout)
+        multipleRequests.waitToExist(timeout: timeout)
     }
 
     /// Every inspector mode names itself in the header text — "Scenarios", "Journey", "Overview".
@@ -960,7 +1064,7 @@ struct RequestDetailPage {
     /// Waits for the inspector's header to read `title` — the signal that the panel switched modes.
     @discardableResult
     func waitForPanelTitle(_ title: String, timeout: TimeInterval = 5) -> Bool {
-        panelTitle(title).waitForExistence(timeout: timeout)
+        panelTitle(title).waitToExist(timeout: timeout)
     }
 }
 
@@ -1016,6 +1120,13 @@ struct InspectorPage {
     /// A scenario row. Clicking it OPENS the scenario in the editor; it does not make it live.
     /// Its value still reports the live state ("active"/"inactive"); its selected trait marks the
     /// row being edited.
+    ///
+    /// Identifier only, and resolved when it is used, so a `waitToExist` on it waits for the row.
+    /// There is nothing to fall back to: `ScenarioRow` makes the row one element
+    /// (`children: .ignore`), so its name is never a static text of its own. A `findScenario` that
+    /// looked for the row once and otherwise returned `staticTexts[name]` left two tests waiting on
+    /// an element that cannot exist whenever the row arrived a moment after the endpoint was created
+    /// (run 37190636173).
     func scenarioRow(named name: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: "inspector.scenario.\(name)").firstMatch
     }
@@ -1028,16 +1139,15 @@ struct InspectorPage {
     /// Makes a scenario live through its radio — the one click that changes what the mock serves.
     func makeLive(named name: String, file: StaticString = #filePath, line: UInt = #line) {
         let radio = liveRadio(named: name)
-        XCTAssertTrue(radio.waitForExistence(timeout: 5), "\(name) should offer a live radio",
+        XCTAssertTrue(radio.waitToExist(timeout: 5), "\(name) should offer a live radio",
                       file: file, line: line)
-        radio.click()
-    }
-
-    /// Finds scenario row by looking for the text content as fallback.
-    func findScenario(named name: String) -> XCUIElement {
-        let byId = scenarioRow(named: name)
-        if byId.exists { return byId }
-        return app.staticTexts[name].firstMatch
+        // Through `UITestApp.click`: a row that has just been added (a duplicate, say) is still
+        // sliding into place, and its radio read as not hittable when clicked at once. Checked by
+        // the row's own live value; making a scenario live is idempotent, so a second click cannot
+        // undo the first.
+        XCTAssertTrue(UITestApp.click(radio, expecting: { self.isScenarioActive(named: name) }),
+                      "Clicking \(name)'s radio should make it live — \(UITestApp.describe(radio))",
+                      file: file, line: line)
     }
 
     /// Whether the row is the one open in the editor (its selected trait), as distinct from live.
@@ -1049,7 +1159,7 @@ struct InspectorPage {
     /// Checks if a scenario row reports itself live ("active").
     func isScenarioActive(named name: String) -> Bool {
         let row = scenarioRow(named: name)
-        guard row.waitForExistence(timeout: 5) else { return false }
+        guard row.waitToExist(timeout: 5) else { return false }
 
         // Compared exactly, not with `contains`. `ScenarioRow` sets its value to "active" or
         // "inactive" and appends ", active" to the spoken label only when the scenario is active —
@@ -1113,12 +1223,53 @@ struct DeleteConfirmationPage {
 // MARK: - XCUIElement Helpers
 
 @MainActor
+extension XCUIApplication {
+    /// The element carrying `identifier`, whatever its type: one of the window's named containers
+    /// (`sidebar`, `drawer`, `welcome.recents.list`…), to scope a predicate query to.
+    ///
+    /// A `CONTAINS` or `BEGINSWITH` over `app.descendants(matching: .any)` is evaluated against every
+    /// element in the window, and polled that has timed XCUITest's query engine out. Inside the one
+    /// container whose rows it is looking for, the same predicate has a fraction of the tree to walk,
+    /// and it cannot match a namesake elsewhere in the window either.
+    func container(named identifier: String) -> XCUIElement {
+        descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+}
+
+/// The suite's waits for an element to arrive or to go: XCTest's `waitForExistence(timeout:)` and
+/// `waitForNonExistence(timeout:)`, with the same answer and the same deadline, minus the second
+/// XCTest spends before it looks.
+///
+/// **XCTest's waits never look before about a second.** Both poll an `existsNoRetry` predicate, as an
+/// `XCTNSPredicateExpectation` does, and on Xcode 26 the first evaluation comes a second in. Across 13
+/// CI shard logs, all 1,527 such waits (these two and the predicate expectations) made their first
+/// check 1.0–1.1 s in, and 1,449 of them passed on that first check, one for a button that had been on
+/// screen for about 4 s. That came to about 9 s of every test.
+///
+/// These look at once and then every tenth of a second, through
+/// ``UITestApp/waitUntil(timeout:pollInterval:_:)``, which turns the run loop between looks as
+/// XCTest's waiter does. The result means what XCTest's did: whether the element was there, or gone,
+/// by the deadline. `Scripts/check_house_rules.sh` keeps XCTest's waits and predicate expectations out
+/// of this target, so the slow form cannot come back one call at a time.
+///
+/// **What the second used to hide.** An element that appeared during a wait used to be found anything
+/// up to a second after it arrived; now it is found within a tenth. A test that clicks a control the
+/// moment it appears, in a sheet or a menu still animating in, loses that accidental settling time.
+/// Such a click wants ``UITestApp/click(_:expecting:attempts:timeout:)`` or
+/// ``UITestApp/waitForStableFrame(_:timeout:)``, which wait for what a click needs, rather than a
+/// slower wait.
+@MainActor
 extension XCUIElement {
-    /// Waits for the element to no longer exist within the given timeout.
-    func waitForNonExistence(timeout: TimeInterval) -> Bool {
-        let predicate = NSPredicate(format: "exists == false")
-        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: self)
-        let result = XCTWaiter().wait(for: [expectation], timeout: timeout)
-        return result == .completed
+    /// Waits up to `timeout` for the element to exist, and returns whether it does.
+    func waitToExist(timeout: TimeInterval) -> Bool {
+        UITestApp.waitUntil(timeout: timeout, pollInterval: 0.1) { self.exists }
+    }
+
+    /// Waits up to `timeout` for the element to stop existing, and returns whether it has.
+    ///
+    /// Gone from the accessibility tree, which is not the same as hidden: a row scrolled out of view
+    /// and a closed menu's items both still exist.
+    func waitToDisappear(timeout: TimeInterval) -> Bool {
+        UITestApp.waitUntil(timeout: timeout, pollInterval: 0.1) { !self.exists }
     }
 }

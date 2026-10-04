@@ -191,7 +191,9 @@ struct InspectorPanelView: View {
                 .accessibilityIdentifier("ds.panelheader.title.inspector")
                 .accessibilityAddTraits(.isHeader)
         }
-        .padding(.leading, DSSpacing.xs)
+        // The toolbar section starts its first item 8pt in; 8pt more puts the title on the 16pt line
+        // the inspector's sections and their rules start on. At 4pt it sat 4pt left of everything below.
+        .padding(.leading, DSSpacing.sm)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("inspector.header")
     }

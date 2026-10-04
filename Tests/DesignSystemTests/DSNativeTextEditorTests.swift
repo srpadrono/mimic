@@ -34,7 +34,10 @@ struct DSNativeTextEditorTests {
     }
 
     private func waitFor(_ description: String = "Native editor state did not settle", _ condition: () -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(2)
+        // Ten seconds, not two. The wait returns as soon as the condition holds, so a longer deadline
+        // costs a passing run nothing, while a CI runner under load once took 2.17 s to move focus and
+        // failed a test whose code had not changed.
+        let deadline = Date().addingTimeInterval(10)
         repeat {
             // Yield the MainActor so native undo notifications, SwiftUI and focus callbacks can run.
             try await Task.sleep(for: .milliseconds(10))

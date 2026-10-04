@@ -138,7 +138,8 @@ final class ErrorAlertUITests: MimicUITestCase {
         app.launchEnvironment["MIMIC_DATABASE_PATH"] = nil
 
         XCTAssertTrue(
-            UITestApp.launchAndBringToForeground(app) { self.welcome.assertVisible(timeout: 1) },
+            // A timeout of 0 looks once: the launch loop does the polling.
+            UITestApp.launchAndBringToForeground(app) { self.welcome.assertVisible(timeout: 0) },
             "The app should relaunch onto a usable welcome window"
         )
         XCTAssertFalse(
@@ -190,12 +191,12 @@ final class ErrorAlertUITests: MimicUITestCase {
 
         // Headers are the second pane of the response; Add header belongs to that pane.
         endpointEditor.showHeaders()
-        XCTAssertTrue(addHeaderButton.waitForExistence(timeout: 5), "The editor should offer 'Add header'")
+        XCTAssertTrue(addHeaderButton.waitToExist(timeout: 5), "The editor should offer 'Add header'")
         XCTAssertTrue(revealInEditor(addHeaderButton), "'Add header' should be reachable in the editor")
         addHeaderButton.click()
 
         let key = endpointEditor.headerKeyField(at: 0)
-        XCTAssertTrue(key.waitForExistence(timeout: 5), "Adding a header should give the row a name field")
+        XCTAssertTrue(key.waitToExist(timeout: 5), "Adding a header should give the row a name field")
         XCTAssertTrue(revealInEditor(key), "The header name field should be reachable in the editor")
         key.click()
         key.typeText(",")
@@ -319,7 +320,7 @@ final class ErrorAlertUITests: MimicUITestCase {
         // its overview is not there to ask.
         let portRow = workspace.projectKind
         XCTAssertTrue(
-            portRow.waitForExistence(timeout: 10),
+            portRow.waitToExist(timeout: 10),
             "The toolbar should report the address the project serves on"
         )
         XCTAssertTrue(
@@ -422,7 +423,7 @@ final class ErrorAlertUITests: MimicUITestCase {
 
         createEndpointViaUI(name: "Users", path: "/api/users")
         XCTAssertTrue(
-            endpointEditor.statusCodeField.waitForExistence(timeout: 10),
+            endpointEditor.statusCodeField.waitToExist(timeout: 10),
             "The endpoint should be editable even though nothing can be written"
         )
 
@@ -449,7 +450,7 @@ final class ErrorAlertUITests: MimicUITestCase {
     func testNewProjectSheetExplainsAPortOutOfRange() throws {
         launchApp()
         welcome.newProjectButton.click()
-        XCTAssertTrue(newProjectSheet.nameField.waitForExistence(timeout: 5), "The sheet should open")
+        XCTAssertTrue(newProjectSheet.nameField.waitToExist(timeout: 5), "The sheet should open")
 
         newProjectSheet.nameField.click()
         newProjectSheet.nameField.typeText("Port Note")
@@ -457,7 +458,7 @@ final class ErrorAlertUITests: MimicUITestCase {
 
         let note = newProjectSheet.portValidationError
         XCTAssertTrue(
-            note.waitForExistence(timeout: 5),
+            note.waitToExist(timeout: 5),
             "A port above 65535 should show an inline validation note"
         )
         XCTAssertTrue(combinedText(of: note).contains("between 1 and 65535"),
@@ -470,7 +471,7 @@ final class ErrorAlertUITests: MimicUITestCase {
         // ERRVALID-03: an unfinished form stays silent.
         replaceText(in: newProjectSheet.portField, with: "")
         XCTAssertTrue(
-            note.waitForNonExistence(timeout: 5),
+            note.waitToDisappear(timeout: 5),
             "An empty port field should say nothing at all"
         )
 
@@ -484,14 +485,14 @@ final class ErrorAlertUITests: MimicUITestCase {
         createProjectViaUI(name: "Path Note")
 
         workspace.addEndpointButton.click()
-        XCTAssertTrue(newEndpointSheet.nameField.waitForExistence(timeout: 5), "The sheet should open")
+        XCTAssertTrue(newEndpointSheet.nameField.waitToExist(timeout: 5), "The sheet should open")
         newEndpointSheet.nameField.click()
         newEndpointSheet.nameField.typeText("Users")
         replaceText(in: newEndpointSheet.pathField, with: "api/users")
 
         let note = newEndpointSheet.pathError
         XCTAssertTrue(
-            note.waitForExistence(timeout: 5),
+            note.waitToExist(timeout: 5),
             "A path without a leading slash should show an inline validation note"
         )
         XCTAssertTrue(combinedText(of: note).contains("must start with"),
@@ -513,13 +514,13 @@ final class ErrorAlertUITests: MimicUITestCase {
         launchApp()
         createProjectViaUI(name: "Editor Notes")
         createEndpointViaUI(name: "Users", path: "/api/users")
-        XCTAssertTrue(endpointEditor.statusCodeField.waitForExistence(timeout: 10))
+        XCTAssertTrue(endpointEditor.statusCodeField.waitToExist(timeout: 10))
 
         // ERRVALID-06. The message is raised at the 300ms settle, not per keystroke — "6" and "60"
         // are honest prefixes of "600".
         replaceText(in: endpointEditor.statusCodeField, with: "600")
         XCTAssertTrue(
-            statusCodeNote.waitForExistence(timeout: 10),
+            statusCodeNote.waitToExist(timeout: 10),
             "A status code outside 200...599 should be explained under the field"
         )
         XCTAssertTrue(
@@ -540,7 +541,7 @@ final class ErrorAlertUITests: MimicUITestCase {
         replaceText(in: endpointEditor.delayField, with: "abc")
         inspector.groupTagField.click()
         XCTAssertTrue(
-            delayNote.waitForExistence(timeout: 10),
+            delayNote.waitToExist(timeout: 10),
             "A delay that is not a whole number should be explained under the field"
         )
         XCTAssertTrue(
@@ -552,12 +553,12 @@ final class ErrorAlertUITests: MimicUITestCase {
         // on the next blur rather than never having gone.
         replaceText(in: endpointEditor.delayField, with: "-5")
         XCTAssertTrue(
-            delayNote.waitForNonExistence(timeout: 5),
+            delayNote.waitToDisappear(timeout: 5),
             "Editing the field should drop the previous complaint"
         )
         inspector.groupTagField.click()
         XCTAssertTrue(
-            delayNote.waitForExistence(timeout: 10),
+            delayNote.waitToExist(timeout: 10),
             "A negative delay should be refused the same way"
         )
     }
@@ -619,17 +620,18 @@ final class ErrorAlertUITests: MimicUITestCase {
 
         journeysTab.click()
         XCTAssertTrue(journeys.waitUntilVisible(), "The journeys navigator should appear")
-        journeys.addButton.click()
-        XCTAssertTrue(journeys.newEmptyMenuItem.waitForExistence(timeout: 5))
+        XCTAssertTrue(UITestApp.click(journeys.addButton, expecting: { journeys.newEmptyMenuItem.exists }),
+                      "The add menu should open — \(UITestApp.describe(journeys.addButton))")
+        XCTAssertTrue(journeys.newEmptyMenuItem.waitToExist(timeout: 5))
         journeys.newEmptyMenuItem.click()
-        XCTAssertTrue(newJourneySheet.nameField.waitForExistence(timeout: 5), "The naming sheet should open")
+        XCTAssertTrue(newJourneySheet.nameField.waitToExist(timeout: 5), "The naming sheet should open")
         newJourneySheet.nameField.click()
         newJourneySheet.nameField.typeText("Step rules")
         newJourneySheet.createButton.click()
 
-        XCTAssertTrue(journeys.addStepButton.waitForExistence(timeout: 10), "The editor should appear")
+        XCTAssertTrue(journeys.addStepButton.waitToExist(timeout: 10), "The editor should appear")
         journeys.addStepButton.click()
-        XCTAssertTrue(stepSheet.pathField.waitForExistence(timeout: 5), "The step sheet should open")
+        XCTAssertTrue(stepSheet.pathField.waitToExist(timeout: 5), "The step sheet should open")
 
         // `JourneyStepSheetPage` carries the fields the journeys suite drives; these two are named
         // here rather than added to it, because this file may not edit that one. Both identifiers
@@ -655,7 +657,7 @@ final class ErrorAlertUITests: MimicUITestCase {
         replaceText(in: delayField, with: "abc")
         stepSheet.saveButton.click()
         XCTAssertTrue(
-            stepSheet.validationMessage.waitForExistence(timeout: 5),
+            stepSheet.validationMessage.waitToExist(timeout: 5),
             "A non-numeric delay should be explained rather than coerced"
         )
         XCTAssertTrue(
@@ -690,12 +692,12 @@ final class ErrorAlertUITests: MimicUITestCase {
         // with nothing to point at reads as a bug in the sheet.
         outcomeSegment("Time out").click()
         XCTAssertTrue(
-            stepSheet.validationMessage.waitForNonExistence(timeout: 5),
+            stepSheet.validationMessage.waitToDisappear(timeout: 5),
             "Switching the outcome should take the complaint with it"
         )
 
         // ERRVALID-16.
-        XCTAssertTrue(stepSheet.holdField.waitForExistence(timeout: 5), "Time out should offer a hold field")
+        XCTAssertTrue(stepSheet.holdField.waitToExist(timeout: 5), "Time out should offer a hold field")
         stepSheet.reveal(stepSheet.holdField, byScrollingUp: true)
         replaceText(in: stepSheet.holdField, with: "-5")
         stepSheet.saveButton.click()
@@ -731,10 +733,11 @@ final class ErrorAlertUITests: MimicUITestCase {
         // ERRDEAD-05.
         let journeys = JourneysNavigatorPage(app: app)
         let newJourneySheet = NewJourneySheetPage(app: app)
-        journeys.addButton.click()
-        XCTAssertTrue(journeys.newEmptyMenuItem.waitForExistence(timeout: 5))
+        XCTAssertTrue(UITestApp.click(journeys.addButton, expecting: { journeys.newEmptyMenuItem.exists }),
+                      "The add menu should open — \(UITestApp.describe(journeys.addButton))")
+        XCTAssertTrue(journeys.newEmptyMenuItem.waitToExist(timeout: 5))
         journeys.newEmptyMenuItem.click()
-        XCTAssertTrue(newJourneySheet.nameField.waitForExistence(timeout: 5))
+        XCTAssertTrue(newJourneySheet.nameField.waitToExist(timeout: 5))
         newJourneySheet.nameField.click()
         newJourneySheet.nameField.typeText("Fresh")
         newJourneySheet.createButton.click()
@@ -763,7 +766,7 @@ final class ErrorAlertUITests: MimicUITestCase {
         // nothing called it shows its figures at zero rather than a sentence.
         let served = InspectorPage(app: app).trafficServed
         XCTAssertTrue(
-            served.waitForExistence(timeout: 10),
+            served.waitToExist(timeout: 10),
             "An endpoint nothing has called should still show its Traffic figures"
         )
         XCTAssertTrue(
@@ -796,7 +799,7 @@ final class ErrorAlertUITests: MimicUITestCase {
 
         await sendRequest(port: port, path: "/api/users")
         XCTAssertTrue(
-            requestLogDrawer.firstLogRow.waitForExistence(timeout: 15),
+            requestLogDrawer.firstLogRow.waitToExist(timeout: 15),
             "The request should reach the log"
         )
 
@@ -825,10 +828,10 @@ final class ErrorAlertUITests: MimicUITestCase {
         let clearFilter = app.buttons.matching(
             NSPredicate(format: "identifier == %@ OR label == %@", "drawer.clearFilter", "Clear filter")
         ).firstMatch
-        XCTAssertTrue(clearFilter.waitForExistence(timeout: 5), "A non-empty filter should offer a clear button")
+        XCTAssertTrue(clearFilter.waitToExist(timeout: 5), "A non-empty filter should offer a clear button")
         clearFilter.click()
         XCTAssertTrue(
-            requestLogDrawer.firstLogRow.waitForExistence(timeout: 5),
+            requestLogDrawer.firstLogRow.waitToExist(timeout: 5),
             "Clearing the filter should bring the request back"
         )
 
@@ -1089,9 +1092,9 @@ final class ErrorAlertUITests: MimicUITestCase {
         // ⌥⌘L rather than the toolbar toggle: in a narrow window the toggle is an item of the
         // "More actions" menu, and reaching it would leave that menu open when there is nothing
         // to hide.
-        guard workspace.drawerEmptyHeading.waitForExistence(timeout: 5) else { return }
+        guard workspace.drawerEmptyHeading.waitToExist(timeout: 5) else { return }
         app.typeKey("l", modifierFlags: [.command, .option])
-        _ = workspace.drawerEmptyHeading.waitForNonExistence(timeout: 3)
+        _ = workspace.drawerEmptyHeading.waitToDisappear(timeout: 3)
     }
 
     /// The editor form's scroller, for the case where hiding the drawer is not enough.
@@ -1135,7 +1138,7 @@ final class ErrorAlertUITests: MimicUITestCase {
     @MainActor
     private func setResponseBody(_ text: String) -> Bool {
         let editor = bodyTextView()
-        guard editor.waitForExistence(timeout: 10) else { return false }
+        guard editor.waitToExist(timeout: 10) else { return false }
         guard revealInEditor(editor) else { return false }
         guard clickIfHittable(editor) else { return false }
 
@@ -1276,7 +1279,7 @@ final class ErrorAlertUITests: MimicUITestCase {
     /// `typeText("")` types nothing and would leave the old value in place.
     @MainActor
     private func replaceText(in field: XCUIElement, with text: String) {
-        XCTAssertTrue(field.waitForExistence(timeout: 5), "Field should exist before it is typed into")
+        XCTAssertTrue(field.waitToExist(timeout: 5), "Field should exist before it is typed into")
         field.click()
         field.typeKey("a", modifierFlags: .command)
         if text.isEmpty {
