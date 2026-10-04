@@ -734,7 +734,7 @@ final class WorkspaceShellUITests: MimicUITestCase {
         // A window with room for the inspector, so the empty-project assertions below are about
         // there being nothing to inspect, not about a window too narrow for the column
         // (`leavesRoomForInspector`: 220pt navigator, 300pt inspector and 320pt centre, so 840pt). Every
-        // launch now starts at the pinned 1024×677, but this test once inherited the 680pt window the
+        // launch now starts at the pinned 1024×674, but this test once inherited the 680pt window the
         // narrowest-window test left behind, and its inspector stayed hidden for want of room.
         workspace.fillWindow()
 

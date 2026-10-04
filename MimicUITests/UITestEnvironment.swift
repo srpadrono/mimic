@@ -23,10 +23,11 @@ import XCTest
 /// from the main screen's height themselves.
 enum UITestEnvironment {
 
-    /// CI's visible frame, in points: the 1024×768 display under a 31pt menu bar and above the Dock.
-    /// Measured from every frame the layout audit recorded on CI (each window's accessibility frame
-    /// starts at y 31 and fills 1024×677), not worked out from the display size.
-    static let screen = CGSize(width: 1024, height: 677)
+    /// CI's visible frame, in points: the 1024×768 display under the menu bar and above the Dock, as
+    /// `NSScreen.visibleFrame` reports it on CI's runners (the drift guard read 1024×674 there). Not
+    /// the 677pt a window's accessibility frame spans: AppKit lays the window out in the visible
+    /// frame, so that is the size the app and this guard must agree on.
+    static let screen = CGSize(width: 1024, height: 674)
 
     /// The key `UITestSupport.pinnedScreenEnvironmentKey` reads, spelled here because this target
     /// links no app code, like ``UITestApp/controlFileEnvironmentKey``.

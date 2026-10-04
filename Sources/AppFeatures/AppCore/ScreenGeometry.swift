@@ -3,7 +3,7 @@ import AppKit
 /// The one place window code asks how much of a screen it may use.
 ///
 /// CI's macOS runners have a 1024×768 display, and its visible frame, under the menu bar and above
-/// the Dock, is 1024×677. A developer's Mac is usually far larger. Every size the window takes from
+/// the Dock, is 1024×674. A developer's Mac is usually far larger. Every size the window takes from
 /// the screen differed between the two: the test window sizes, the welcome screen's centring, the
 /// first workspace's frame and the fit that keeps the window above the Dock. So a layout test that
 /// failed on CI passed locally, and the failure could not be reproduced without a CI run.

@@ -95,7 +95,7 @@ enum UITestSupport {
     // MARK: - The same screen and the same first frame as CI
 
     /// Set to `<width>x<height>`, in points, to pin the screen every window size is taken from.
-    /// The UI test harness sets CI's visible frame, `1024x677`, on every launch (`UITestEnvironment`
+    /// The UI test harness sets CI's visible frame, `1024x674`, on every launch (`UITestEnvironment`
     /// in `MimicUITests`, which spells this key itself because the runner links no app code).
     static let pinnedScreenEnvironmentKey = "MIMIC_UITEST_SCREEN"
 
@@ -146,7 +146,7 @@ enum UITestSupport {
     ///
     /// Called once per window, by `WindowRoleFrame` just before it first reads the frame, so the
     /// welcome screen centres inside the pinned frame and records it as the workspace's: the first
-    /// project then opens filling the pinned screen (1024×677), as it does on CI. A relaunch that
+    /// project then opens filling the pinned screen (1024×674), as it does on CI. A relaunch that
     /// keeps the run's store, and so opens straight onto a project, starts its workspace at the
     /// same frame rather than wherever the previous process left it.
     static func prepareWindowForTesting(_ window: NSWindow) {

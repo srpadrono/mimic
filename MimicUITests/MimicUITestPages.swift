@@ -404,7 +404,7 @@ struct WorkspacePage {
     /// The whole pinned screen, which is what Test: Fill Window gives the window on every Mac.
     ///
     /// It used to accept any frame 1180pt wide, or the runner's own display, so "filled" meant
-    /// 1024×677 on CI and something far larger locally, and a test could pass at a size CI never
+    /// 1024×674 on CI and something far larger locally, and a test could pass at a size CI never
     /// reaches. The app now takes every size from ``UITestEnvironment/screen``, and so does this.
     private static func isFilled(_ frame: CGRect) -> Bool {
         frame.width >= UITestEnvironment.screen.width - 1 && frame.height >= UITestEnvironment.screen.height - 1

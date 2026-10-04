@@ -20,7 +20,7 @@ import XCTest
 /// `Scripts/layout_audit_report.py` turns that folder into the contact sheet.
 ///
 /// The sizes come from the app's Debug-only Window ▸ Test commands, which work from the screen's
-/// visible frame. UI test launches pin that to CI's 1024×677pt (`UITestEnvironment`), so on every
+/// visible frame. UI test launches pin that to CI's 1024×674pt (`UITestEnvironment`), so on every
 /// Mac the sweep's widths are the narrowest window, the compact width (900pt) and the full 1024pt.
 ///
 /// The sweep steers by the panels' frames, and reads all of them from one snapshot of the window at

@@ -4,10 +4,10 @@ import AppKit
 ///
 /// The import review, the backend settings and the journey step sheet each cap their height at the
 /// visible screen, so a compact display keeps their footers reachable. They used to read
-/// `NSScreen.main` directly. A UI test launch pins the window to CI's 1024×677 visible frame
+/// `NSScreen.main` directly. A UI test launch pins the window to CI's 1024×674 visible frame
 /// (`ScreenGeometry` in AppFeatures), but a section cannot reach that, and the environment does not
 /// cross the split pane's hosting controllers. So on a 1080p Mac these sheets opened at their design
-/// height, taller than the pinned window, while on CI they were capped from 677pt: content that
+/// height, taller than the pinned window, while on CI they were capped from 674pt: content that
 /// scrolled on CI was all on screen locally.
 ///
 /// The app sets ``pinnedVisibleHeight`` once at startup from the same pin. It exists only in Debug

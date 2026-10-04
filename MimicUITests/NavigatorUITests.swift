@@ -587,7 +587,7 @@ final class NavigatorUITests: MimicUITestCase {
         let stepList = JourneysNavigatorPage(app: app).stepList
         XCTAssertTrue(stepList.waitToExist(timeout: 5),
                       "The steps should keep their own list, journeyEditor.stepList, inside the centre pane")
-        // The compact window is 900×677 (CI's screen, pinned for every launch), which leaves the second
+        // The compact window is 900×674 (CI's screen, pinned for every launch), which leaves the second
         // step below the fold, so the list has to scroll. A negative wheel delta brings up what is
         // below. The loop is bounded and stops as soon as the step is reachable, so it costs nothing
         // where the step is already in view and a list that will not scroll fails below.

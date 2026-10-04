@@ -766,30 +766,30 @@ struct WorkspaceFeatureLogicTests {
 
     @Test("A first workspace opens wide enough for the inspector, even on a 1024pt screen")
     func firstWorkspaceFrameLeavesRoomForTheInspector() {
-        // The welcome screen centred on CI's visible frame: a 1024×768 display under a 31pt menu
-        // bar and above the Dock, 1024×677 as every frame of the layout audit measured it on CI.
-        let visible = CGRect(x: 0, y: 60, width: 1024, height: 677)
-        let welcome = CGRect(x: 72, y: 118, width: 880, height: 561)
+        // The welcome screen centred on CI's visible frame: a 1024×768 display under the menu bar
+        // and above the Dock, 1024×674 as `NSScreen.visibleFrame` reports it on CI's runners.
+        let visible = CGRect(x: 0, y: 63, width: 1024, height: 674)
+        let welcome = CGRect(x: 72, y: 120, width: 880, height: 560)
         let first = WindowRoleFrame.centredFrame(around: welcome, size: WindowRoleFrame.defaultWorkspaceSize,
                                                  visible: visible)
-        #expect(first == CGRect(x: 0, y: 60, width: 1024, height: 677))
+        #expect(first == CGRect(x: 0, y: 63, width: 1024, height: 674))
         // The navigator at its widest, the centre's floor beside it and the inspector at its least.
         #expect(first.width >= 976)
     }
 
     @Test("A pinned screen is CI's visible frame at the top left of the real one, and never larger")
     func pinnedScreenFrameSitsAtTheTopLeft() {
-        let pin = CGSize(width: 1024, height: 677)
+        let pin = CGSize(width: 1024, height: 674)
         // CI's own display: the pinned frame is its visible frame, exactly.
-        let ci = CGRect(x: 0, y: 60, width: 1024, height: 677)
+        let ci = CGRect(x: 0, y: 63, width: 1024, height: 674)
         #expect(ScreenGeometry.pinnedFrame(pin, in: ci) == ci)
         // A 1920×1080 display under a 37pt menu bar, Dock hidden: the top edge stays where it is.
         let large = CGRect(x: 0, y: 0, width: 1920, height: 1043)
-        #expect(ScreenGeometry.pinnedFrame(pin, in: large) == CGRect(x: 0, y: 366, width: 1024, height: 677))
+        #expect(ScreenGeometry.pinnedFrame(pin, in: large) == CGRect(x: 0, y: 369, width: 1024, height: 674))
         // A second display left of and above the main one keeps its own origin.
         let secondary = CGRect(x: -1440, y: 1080, width: 1440, height: 875)
         #expect(ScreenGeometry.pinnedFrame(pin, in: secondary)
-                == CGRect(x: -1440, y: 1278, width: 1024, height: 677))
+                == CGRect(x: -1440, y: 1281, width: 1024, height: 674))
         // A display smaller than the pin is used whole rather than overrun.
         let small = CGRect(x: 0, y: 60, width: 800, height: 540)
         #expect(ScreenGeometry.pinnedFrame(pin, in: small) == small)
@@ -797,15 +797,15 @@ struct WorkspaceFeatureLogicTests {
 
     @Test("On a pinned screen the welcome screen and the first workspace take the frames they take on CI")
     func pinnedScreenGivesTheWindowCIsFrames() {
-        let pin = CGSize(width: 1024, height: 677)
-        let ci = CGRect(x: 0, y: 60, width: 1024, height: 677)
+        let pin = CGSize(width: 1024, height: 674)
+        let ci = CGRect(x: 0, y: 63, width: 1024, height: 674)
         let pinned = ScreenGeometry.pinnedFrame(pin, in: CGRect(x: 0, y: 0, width: 1920, height: 1043))
         let welcomeSize = CGSize(width: 880, height: 560)
         // A UI test window starts at the whole pinned frame, and the welcome screen centres in it.
-        // Centring on 677pt lands on a half point, which `integral` widens to 561pt on both.
+        // 674pt centres the 560pt board on a whole point, so nothing is rounded on either.
         let welcomeOnCI = WindowRoleFrame.centredFrame(around: ci, size: welcomeSize, visible: ci)
         let welcomePinned = WindowRoleFrame.centredFrame(around: pinned, size: welcomeSize, visible: pinned)
-        #expect(welcomeOnCI == CGRect(x: 72, y: 118, width: 880, height: 561))
+        #expect(welcomeOnCI == CGRect(x: 72, y: 120, width: 880, height: 560))
         // The same size, the same distance from the top left corner: a click aimed at a control
         // lands on it on both.
         #expect(welcomePinned.size == welcomeOnCI.size)

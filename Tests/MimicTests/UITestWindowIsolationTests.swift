@@ -19,8 +19,8 @@ struct UITestWindowIsolationTests {
     func aUITestLaunchPinsTheScreen() {
         #expect(UITestSupport.pinnedScreenEnvironmentKey == screenKey)
         #expect(UITestSupport.pinnedScreenSize(
-            environment: uiTestSuite.merging([screenKey: "1024x677"]) { $1 }, arguments: []
-        ) == CGSize(width: 1024, height: 677))
+            environment: uiTestSuite.merging([screenKey: "1024x674"]) { $1 }, arguments: []
+        ) == CGSize(width: 1024, height: 674))
         // The reset argument is the other half of the UI test gate.
         #expect(UITestSupport.pinnedScreenSize(
             environment: [screenKey: "1280X800"], arguments: ["-MimicResetForTesting"]
@@ -30,7 +30,7 @@ struct UITestWindowIsolationTests {
     @Test("Nothing but a well-formed size on a UI test launch pins the screen")
     func onlyAWellFormedUITestValuePins() {
         // Not a UI test launch: a stray variable must not shrink a developer's windows.
-        #expect(UITestSupport.pinnedScreenSize(environment: [screenKey: "1024x677"], arguments: []) == nil)
+        #expect(UITestSupport.pinnedScreenSize(environment: [screenKey: "1024x674"], arguments: []) == nil)
         // A UI test launch that pinned nothing.
         #expect(UITestSupport.pinnedScreenSize(environment: uiTestSuite, arguments: []) == nil)
         let malformedValues = ["", "1024", "1024x", "x677", "1024x677x2", "1024 x 677", "wide",
