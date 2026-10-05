@@ -5,6 +5,10 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The README has a step-by-step tutorial for new users, and its screenshots are taken from the 0.14.0 app.
+
 ## [0.14.0] — 2026-10-04
 
 ### Added
