@@ -140,6 +140,8 @@
     "Design/Canvas/**",
     ".github/dependabot.yml",
     ".github/workflows/codeql.yml",
+    ".github/workflows/release.yml",
+    "Packaging/**",
     ".gitignore",
     "Package.swift",
     "Package.resolved",

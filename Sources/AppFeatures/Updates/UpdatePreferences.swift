@@ -13,6 +13,9 @@ final class UpdatePreferences: @unchecked Sendable {
     private static let automaticChecksKey = "updates.automaticChecks"
     private static let lastCheckedAtKey = "updates.lastCheckedAt"
     private static let skippedVersionKey = "updates.skippedVersion"
+    /// Set by an administrator, not by Mimic: a configuration profile for `devxa.Mimic`, or
+    /// `defaults write devxa.Mimic updates.disabled -bool true`. README ▸ Managed installs documents it.
+    static let updatesDisabledKey = "updates.disabled"
 
     /// How long after a check before another one is due.
     ///
@@ -37,6 +40,16 @@ final class UpdatePreferences: @unchecked Sendable {
         set { defaults.set(newValue, forKey: Self.automaticChecksKey) }
     }
 
+    /// Whether something outside Mimic owns updates, such as a company that pins versions through
+    /// Homebrew or device management. Read-only: Mimic has no control that turns it on or off.
+    ///
+    /// A company that has approved one version must not find people on another the next morning, so
+    /// this silences automatic checks **and** the manual menu item, not only the background check
+    /// that ``checksAutomatically`` already covers.
+    var updatesAreManaged: Bool {
+        defaults.bool(forKey: Self.updatesDisabledKey)
+    }
+
     var lastCheckedAt: Date? {
         get { defaults.object(forKey: Self.lastCheckedAtKey) as? Date }
         set { defaults.set(newValue, forKey: Self.lastCheckedAtKey) }
@@ -58,7 +71,7 @@ final class UpdatePreferences: @unchecked Sendable {
     ///
     /// Takes `now` rather than reading the clock, so the boundary is testable without waiting a day.
     func isAutomaticCheckDue(now: Date = Date()) -> Bool {
-        guard checksAutomatically else { return false }
+        guard checksAutomatically, !updatesAreManaged else { return false }
         guard let lastCheckedAt else { return true }
         // A restored backup or corrected system clock must not postpone checks indefinitely.
         guard lastCheckedAt <= now else { return true }

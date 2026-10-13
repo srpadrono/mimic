@@ -111,7 +111,11 @@ UI tests must use an isolated `MIMIC_DEFAULTS_SUITE` and test-owned database pat
 
 ## Releases
 
-Update `MARKETING_VERSION` in `Project.swift` and `ControlAPI.releaseVersion` in `Sources/Domain/Control/ControlResult.swift` together. `ControlAPI.version` changes only for a breaking control API change. Regenerate the workspace after the version bump, run `./Scripts/ci.sh`, and require the full CI gates before release. Use `Scripts/package_release.sh` with the signing and notarization settings described in its header.
+Update `MARKETING_VERSION` in `Project.swift` and `ControlAPI.releaseVersion` in `Sources/Domain/Control/ControlResult.swift` together. `ControlAPI.version` changes only for a breaking control API change. Regenerate the workspace after the version bump, run `./Scripts/ci.sh`, and require the full CI gates before release.
+
+Push the tag `vX.Y.Z`. The [Release workflow](.github/workflows/release.yml) waits for approval on the `release` environment, then runs `Scripts/package_release.sh` on a GitHub-hosted runner, attests build provenance and the SPDX SBOM, and creates a **draft** release with the `.pkg` and the SBOM. The `release` environment holds six secrets: `DEVELOPER_ID_APP_P12` and `DEVELOPER_ID_INSTALLER_P12` (the Developer ID Application and Installer certificates exported as `.p12` and base64-encoded), `P12_PASSWORD`, and an App Store Connect API key for notarization as `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_KEY_P8` (the `.p8` file's contents). To build locally instead, use `Scripts/package_release.sh` with the signing and notarization settings described in its header.
+
+After publishing, copy [`Packaging/Homebrew/Casks/mimic.rb`](Packaging/Homebrew/Casks/mimic.rb) to `Casks/mimic.rb` in [srpadrono/homebrew-tap](https://github.com/srpadrono/homebrew-tap) with the new `version` and `sha256`. The workflow's summary prints both; for a local build, run `shasum -a 256 .artifacts/release/Mimic-X.Y.Z.pkg`. Commit the same values to the copy in this repository. Release immutability is on, so a published release's tag and assets cannot change: fix a bad release with a new version.
 
 Before publishing, run the [release regression gate](docs/RELEASE_REGRESSION.md) against the signed build and attach its recordings to the GitHub release. A failed core scenario keeps the release a draft.
 

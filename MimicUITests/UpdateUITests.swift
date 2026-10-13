@@ -13,10 +13,17 @@ final class UpdateUITests: MimicUITestCase {
     /// launched with cannot be changed once it is running.
     private var feedFixture: String = UpdateFixtures.available
     private var installFixture: String?
+    /// Stands in for an administrator's configuration profile. A `-key value` launch argument lands
+    /// in the argument domain, which every `UserDefaults` suite reads ahead of its own values, the
+    /// same way a managed profile's forced value does.
+    private var updatesManagedByAdministrator = false
 
     override func configureLaunchEnvironment(_ app: XCUIApplication) {
         app.launchEnvironment["MIMIC_UPDATE_FEED_FIXTURE"] = feedFixture
         app.launchEnvironment["MIMIC_UPDATE_INSTALL_FIXTURE"] = installFixture
+        if updatesManagedByAdministrator {
+            app.launchArguments += ["-updates.disabled", "YES"]
+        }
     }
 
     private var updateSheet: UpdateSheetPage { UpdateSheetPage(app: app) }
@@ -67,6 +74,23 @@ final class UpdateUITests: MimicUITestCase {
             updateSheet.menuItem.waitToExist(timeout: 5),
             "Mimic ▸ Check for Updates… should exist"
         )
+    }
+
+    /// A company that pins Mimic through Homebrew or device management turns updates off. The usual
+    /// item gives way to a disabled one that says why, so nobody can install a version their
+    /// organisation has not approved.
+    @MainActor
+    func testManagedUpdatesReplaceTheMenuItemWithAnExplanation() {
+        updatesManagedByAdministrator = true
+        launchApp()
+
+        updateSheet.openMimicMenu(expecting: updateSheet.managedMenuItem)
+        XCTAssertTrue(updateSheet.managedMenuItem.waitToExist(timeout: 5),
+                      "Mimic ▸ Updates Managed by Your Organization should exist")
+        XCTAssertFalse(updateSheet.managedMenuItem.isEnabled, "the managed item must not do anything")
+        XCTAssertFalse(updateSheet.menuItem.exists, "Check for Updates… must not be offered")
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(updateSheet.title.waitToDisappear(timeout: 2), "no update sheet should appear")
     }
 
     // MARK: - An update is available
@@ -200,6 +224,7 @@ struct UpdateSheetPage {
     /// The menu item, reached through the app menu rather than by keyboard shortcut — it has none,
     /// deliberately, because it is not something you invoke often enough to need one.
     var menuItem: XCUIElement { app.menuBars.menuItems["Check for Updates…"] }
+    var managedMenuItem: XCUIElement { app.menuBars.menuItems["Updates Managed by Your Organization"] }
 
     var title: XCUIElement { app.staticTexts["update.title"] }
     var upToDate: XCUIElement { app.staticTexts["update.upToDate"] }
@@ -227,14 +252,20 @@ struct UpdateSheetPage {
         return element.value as? String ?? ""
     }
 
-    /// Opens the sheet the way a person does.
+    /// Opens the Mimic menu and waits until `item` in it can be reached.
     @MainActor
-    func openFromMenu() {
+    func openMimicMenu(expecting item: XCUIElement) {
         let mimicMenu = app.menuBars.menuBarItems.element(boundBy: 1)
         XCTAssertTrue(mimicMenu.waitToExist(timeout: 5), "the Mimic menu should exist")
         // Hittable, not merely present: a menu bar's items are in the tree while their menu is closed.
-        XCTAssertTrue(UITestApp.click(mimicMenu, expecting: { menuItem.exists && menuItem.isHittable }),
+        XCTAssertTrue(UITestApp.click(mimicMenu, expecting: { item.exists && item.isHittable }),
                       "the Mimic menu should open — \(UITestApp.describe(mimicMenu))")
+    }
+
+    /// Opens the sheet the way a person does.
+    @MainActor
+    func openFromMenu() {
+        openMimicMenu(expecting: menuItem)
         XCTAssertTrue(menuItem.waitToExist(timeout: 5), "Check for Updates… should be in the menu")
         menuItem.click()
     }

@@ -13,7 +13,28 @@ Mimic is a native macOS app that runs local mock API servers. Define endpoints a
 
 ## Install
 
-Download the [latest release](https://github.com/srpadrono/mimic/releases/latest) and run its signed `.pkg`. It installs `Mimic.app` in `/Applications` and `mimic` in `/usr/local/bin`. To build from source, see [Contributing](CONTRIBUTING.md).
+Install with [Homebrew](https://brew.sh):
+
+```sh
+brew install --cask srpadrono/tap/mimic
+```
+
+Or download the [latest release](https://github.com/srpadrono/mimic/releases/latest) and run its signed `.pkg`. Either way, it installs `Mimic.app` in `/Applications` and `mimic` in `/usr/local/bin`. To build from source, see [Contributing](CONTRIBUTING.md).
+
+### Check a download
+
+Releases after 0.14.0 are built by the [Release workflow](.github/workflows/release.yml) on GitHub's runners and carry a build provenance attestation and an SPDX SBOM. To confirm an installer was built from this repository at its tag:
+
+```sh
+gh attestation verify Mimic-X.Y.Z.pkg --repo srpadrono/mimic \
+  --signer-workflow srpadrono/mimic/.github/workflows/release.yml \
+  --source-ref refs/tags/vX.Y.Z
+gh release verify vX.Y.Z -R srpadrono/mimic
+```
+
+### Managed installs
+
+Mimic checks GitHub once a day and offers new versions from **Mimic ▸ Check for Updates…**. An organisation that approves versions itself, through its own Homebrew tap or device management, can turn this off by setting `updates.disabled` to `true` for the `devxa.Mimic` preference domain in a configuration profile. For one Mac, `defaults write devxa.Mimic updates.disabled -bool true` does the same. Mimic then makes no update checks, and the menu shows **Updates Managed by Your Organization** in place of Check for Updates. `mimic app update-check` still reports whether a newer release exists, because it never installs anything.
 
 ## Tutorial
 
