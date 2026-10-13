@@ -119,6 +119,9 @@ final class UpdateService: UpdateSheetModel {
     /// The running version, for the sheet's own prose.
     var installedVersionDescription: String { installedVersion.description }
 
+    /// An administrator turned updates off; see ``UpdatePreferences/updatesAreManaged``.
+    var updatesAreManaged: Bool { preferences.updatesAreManaged }
+
     var checksAutomatically: Bool {
         get { preferences.checksAutomatically }
         set { preferences.checksAutomatically = newValue }
@@ -132,6 +135,7 @@ final class UpdateService: UpdateSheetModel {
     /// the menu item look broken.
     func checkForUpdates() {
         if case .installing = phase { return }
+        guard !updatesAreManaged else { return }
         isShowingSheet = true
         startCheck(announceWhenUpToDate: true)
     }
@@ -232,7 +236,7 @@ final class UpdateService: UpdateSheetModel {
     // MARK: - Downloading
 
     func downloadAndPrepare() {
-        guard case .available(let release) = phase else { return }
+        guard !updatesAreManaged, case .available(let release) = phase else { return }
         let id = UUID()
         downloadID = id
         phase = .downloading(release, fraction: 0)

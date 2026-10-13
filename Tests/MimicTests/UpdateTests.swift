@@ -68,6 +68,26 @@ struct UpdatePreferencesTests {
         #expect(!preferences.isAutomaticCheckDue(now: Date(timeIntervalSince1970: 1_787_493_751)))
     }
 
+    @Test("Updates are not managed unless an administrator says so")
+    func updatesAreUnmanagedByDefault() throws {
+        let preferences = try makePreferences()
+        #expect(!preferences.updatesAreManaged)
+    }
+
+    /// The key an administrator's configuration profile sets. Written as a literal, not through
+    /// `updatesDisabledKey`, because the profile is the external input and renaming the constant
+    /// would silently break every company that already deployed it.
+    @Test("An administrator's setting stops automatic checks even when they are switched on")
+    func managedUpdatesAreNeverDue() throws {
+        let suite = try #require(UserDefaults(suiteName: "UpdatePreferencesTests.\(UUID().uuidString)"))
+        suite.set(true, forKey: "updates.disabled")
+        let preferences = UpdatePreferences(defaults: suite)
+
+        #expect(preferences.updatesAreManaged)
+        #expect(preferences.checksAutomatically)
+        #expect(!preferences.isAutomaticCheckDue(now: Date(timeIntervalSince1970: 1_787_493_751)))
+    }
+
     @Test("A skipped version round-trips, and can be cleared")
     func skippedVersionPersists() throws {
         let preferences = try makePreferences()
@@ -135,9 +155,11 @@ struct UpdateServiceTests {
 
     private func makeService(
         installed: String = "0.10.0",
+        managed: Bool = false,
         latest: @escaping @Sendable () async throws -> UpdateRelease = { UpdateServiceTests.release("0.11.0") }
     ) throws -> (service: UpdateService, preferences: UpdatePreferences) {
         let suite = try #require(UserDefaults(suiteName: "UpdateServiceTests.\(UUID().uuidString)"))
+        if managed { suite.set(true, forKey: "updates.disabled") }
         let preferences = UpdatePreferences(defaults: suite)
         let service = UpdateService(
             installedVersion: { ReleaseVersion(installed)! },
@@ -232,6 +254,19 @@ struct UpdateServiceTests {
 
         #expect(service.phase == .idle)
         #expect(!service.isShowingSheet)
+    }
+
+    @Test("Managed updates never check, even when asked from the menu")
+    func managedUpdatesNeverCheck() async throws {
+        let feed = HeldFeed()
+        let (service, _) = try makeService(managed: true, latest: { try await feed.fetch() })
+
+        service.checkAutomaticallyIfDue()
+        service.checkForUpdates()
+
+        #expect(service.phase == .idle)
+        #expect(!service.isShowingSheet)
+        #expect(await feed.fetchCount == 0)
     }
 
     // MARK: Failure

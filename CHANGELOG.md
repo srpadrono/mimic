@@ -5,6 +5,14 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Install with Homebrew: `brew install --cask srpadrono/tap/mimic`.
+- An organisation can turn off update checks with the `updates.disabled` managed preference. The
+  menu then says updates are managed by your organisation instead of offering Check for Updates.
+- Releases are built, notarized and attested by a GitHub Actions workflow, with build provenance and
+  an SPDX SBOM that `gh attestation verify` can check.
+
 ### Changed
 
 - The README has a step-by-step tutorial for new users, and its screenshots are taken from the 0.14.0 app.
