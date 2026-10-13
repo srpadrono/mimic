@@ -126,7 +126,7 @@ let package = Package(
         // Vendor/README.md lists what changed. Its Rearrange dependency still resolves from its URL and is
         // pinned here. (0.16 fixes native typing after Unicode characters using UTF-16 text ranges.)
         .package(path: "../Vendor/CodeEditorView"),
-        .package(url: "https://github.com/mattpolzin/OpenAPIKit.git", from: "6.4.0"),
+        .package(url: "https://github.com/mattpolzin/OpenAPIKit.git", from: "7.0.0"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
     ],
     targets: []
