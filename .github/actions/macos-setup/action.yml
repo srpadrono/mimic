@@ -144,7 +144,14 @@ runs:
       shell: bash
       run: |
         tuist version
-        tuist install
+        # A restored Tuist/.build can carry checkouts the new lockfile drops (OpenAPIKit's test-only
+        # Yams), and SwiftPM refuses to remove one it sees as dirty. Resolve once more from an empty
+        # .build rather than fail; the lockfile check below still holds the result to the commit.
+        tuist install || {
+          echo "::warning::tuist install failed on the restored dependency cache; retrying from an empty Tuist/.build."
+          rm -rf Tuist/.build
+          tuist install
+        }
         git diff --exit-code -- Tuist/Package.resolved || {
           echo "::error::tuist install re-resolved Tuist/Package.resolved (diff above). The workspace this job generated is not the one the commit describes. Reproduce with 'tuist install', commit the result, and move Package.resolved with it — Scripts/check_lockfiles.py is what says whether they still agree."
           exit 1
