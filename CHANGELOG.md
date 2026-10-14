@@ -5,6 +5,8 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-10-14
+
 ### Added
 
 - Install with Homebrew: `brew install --cask srpadrono/tap/mimic`.
@@ -616,6 +618,7 @@ Ships as a signed and notarised installer that puts Mimic.app in `/Applications`
 Beta, and versioned below 1.0 deliberately: the interface and the stored project format may still
 change between releases.
 
+[0.15.0]: https://github.com/srpadrono/mimic/releases/tag/v0.15.0
 [0.14.0]: https://github.com/srpadrono/mimic/releases/tag/v0.14.0
 [0.13.0]: https://github.com/srpadrono/mimic/releases/tag/v0.13.0
 [0.11.0]: https://github.com/srpadrono/mimic/releases/tag/v0.11.0
