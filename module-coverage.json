@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "label": "modules at or above 95%",
+  "message": "5/8",
+  "color": "red"
+}
