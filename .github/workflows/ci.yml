@@ -297,7 +297,7 @@ jobs:
       - name: Upload the design fidelity report
         if: ${{ !cancelled() && needs.plan.outputs.full == 'true' && hashFiles('.artifacts/fidelity/**') != '' }}
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fidelity-report
           path: .artifacts/fidelity
@@ -316,7 +316,7 @@ jobs:
 
       - name: Upload new and changed snapshots
         if: ${{ !cancelled() && needs.plan.outputs.unit != 'none' && hashFiles('.artifacts/snapshots/**') != '' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: snapshots
           path: .artifacts/snapshots
@@ -345,7 +345,7 @@ jobs:
       - name: Upload the coverage bundle
         if: needs.plan.outputs.coverage == 'true'
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-bundle-unit
           path: .artifacts/UnitTests.xcresult.tar.gz
@@ -418,7 +418,7 @@ jobs:
 
       - name: Upload test results
         if: ${{ failure() || cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: xcresult-unit
           path: |
@@ -479,7 +479,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download the snapshots
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: snapshots
           path: ${{ runner.temp }}/snapshots
@@ -556,7 +556,7 @@ jobs:
 
       # Kept three days so "Re-run failed jobs" still finds them after a weekend.
       - name: Upload UI test products
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ui-test-products
           path: .artifacts/MimicUITests.xctestproducts.tar.gz
@@ -612,14 +612,14 @@ jobs:
       - name: Download UI test products
         id: products
         continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ui-test-products
           path: .artifacts/download
 
       - name: Download UI test products (second attempt)
         if: steps.products.outcome == 'failure'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ui-test-products
           path: .artifacts/download
@@ -676,7 +676,7 @@ jobs:
       - name: Upload the flaky test list
         if: ${{ !cancelled() && hashFiles('.artifacts/flaky/*.md') != '' }}
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: flaky-ui-${{ matrix.id }}
           path: .artifacts/flaky
@@ -699,7 +699,7 @@ jobs:
 
       - name: Upload test results
         if: ${{ failure() || cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: xcresult-ui-${{ matrix.id }}
           path: |
@@ -728,7 +728,7 @@ jobs:
 
       - name: Upload the layout audit
         if: ${{ !cancelled() && steps.audit.outputs.ready == 'true' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: layout-audit-${{ matrix.id }}
           path: |
@@ -757,7 +757,7 @@ jobs:
       - name: Upload the coverage bundle
         if: ${{ !cancelled() && needs.plan.outputs.coverage == 'true' }}
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-bundle-ui-${{ matrix.id }}
           path: .artifacts/UITests-${{ matrix.id }}.xcresult.tar.gz
@@ -786,7 +786,7 @@ jobs:
       - name: Download the layout audit
         id: download
         continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: layout-audit-*
           merge-multiple: true
@@ -836,7 +836,7 @@ jobs:
       - name: Collect flaky tests
         if: needs.plan.outputs.ui == 'true'
         continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: flaky-ui-*
           merge-multiple: true
@@ -903,7 +903,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download the result bundles
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: coverage-bundle-*
           merge-multiple: true
