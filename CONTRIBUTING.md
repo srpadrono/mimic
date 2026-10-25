@@ -119,4 +119,6 @@ After publishing, copy [`Packaging/Homebrew/Casks/mimic.rb`](Packaging/Homebrew/
 
 Before publishing, run the [release regression gate](docs/RELEASE_REGRESSION.md) against the signed build and attach its recordings to the GitHub release. A failed core scenario keeps the release a draft.
 
+The Mac App Store build is separate and does not change any of the above. `Scripts/package_app_store.sh` archives it with `MIMIC_APP_STORE=YES`, which compiles out the update check and leaves the `mimic` command out, and checks the archive is one App Store Connect accepts; CI's Release build runs it unsigned. [App Store](docs/APP_STORE.md) covers signing, upload, and what to set in App Store Connect.
+
 Only a signed, notarized, stapled installer that passes Gatekeeper assessment is copied to `.artifacts/release` for publication. Unsigned or signed-only development packages remain under `.artifacts/package`; missing or failed requested signing is an error. A passing build or fixture-based update test does not prove real installer acceptance. Record user-visible changes in [CHANGELOG.md](CHANGELOG.md).

@@ -41,15 +41,19 @@ public struct MimicScene: Scene {
             // it. Title Case because it is in the menu bar — the one place in this app that is not
             // sentence case, per Apple's HIG and Xcode's own menus.
             CommandGroup(after: .appInfo) {
-                // An organisation that pins Mimic's version turns updates off; the disabled item says
-                // why the usual one is missing instead of leaving people to wonder where it went.
-                if appState.updates.updatesAreManaged {
-                    Button("Updates Managed by Your Organization") {}
-                        .disabled(true)
-                        .accessibilityIdentifier("menu.updatesManaged")
-                } else {
-                    Button("Check for Updates\u{2026}") { appState.updates.checkForUpdates() }
-                        .accessibilityIdentifier("menu.checkForUpdates")
+                // The App Store build has no item at all, as no store app does: the store updates it.
+                if !appState.updates.updatesComeFromAppStore {
+                    // An organisation that pins Mimic's version turns updates off; the disabled item
+                    // says why the usual one is missing instead of leaving people to wonder where it
+                    // went.
+                    if appState.updates.updatesAreManaged {
+                        Button("Updates Managed by Your Organization") {}
+                            .disabled(true)
+                            .accessibilityIdentifier("menu.updatesManaged")
+                    } else {
+                        Button("Check for Updates\u{2026}") { appState.updates.checkForUpdates() }
+                            .accessibilityIdentifier("menu.checkForUpdates")
+                    }
                 }
             }
 

@@ -156,6 +156,7 @@ struct UpdateServiceTests {
     private func makeService(
         installed: String = "0.10.0",
         managed: Bool = false,
+        distribution: DistributionChannel = .direct,
         latest: @escaping @Sendable () async throws -> UpdateRelease = { UpdateServiceTests.release("0.11.0") }
     ) throws -> (service: UpdateService, preferences: UpdatePreferences) {
         let suite = try #require(UserDefaults(suiteName: "UpdateServiceTests.\(UUID().uuidString)"))
@@ -164,6 +165,7 @@ struct UpdateServiceTests {
         let service = UpdateService(
             installedVersion: { ReleaseVersion(installed)! },
             preferences: preferences,
+            distribution: distribution,
             fetchLatestRelease: latest,
             now: { Date(timeIntervalSince1970: 1_787_493_751) },
             // Never touches a disk in a test. The real one is exercised by `StoreBackupTests`.
@@ -263,6 +265,39 @@ struct UpdateServiceTests {
 
         service.checkAutomaticallyIfDue()
         service.checkForUpdates()
+
+        #expect(service.phase == .idle)
+        #expect(!service.isShowingSheet)
+        #expect(await feed.fetchCount == 0)
+    }
+
+    /// The store build compiles with `MIMIC_APP_STORE`; every scheme in this repository builds
+    /// without it, so a test build that answered `.appStore` would mean the default had flipped and
+    /// the GitHub installer had lost its update check.
+    @Test("Builds from the repository's schemes are the direct channel")
+    func repositoryBuildsAreDirect() throws {
+        let suite = try #require(UserDefaults(suiteName: "UpdateServiceTests.\(UUID().uuidString)"))
+        let service = UpdateService(
+            installedVersion: { ReleaseVersion("0.10.0")! },
+            preferences: UpdatePreferences(defaults: suite)
+        )
+
+        #expect(DistributionChannel.current == .direct)
+        #expect(!service.updatesComeFromAppStore)
+    }
+
+    /// The App Store updates its own builds, and App Review rejects an app that updates itself any
+    /// other way, so neither the daily check nor the menu may reach the feed.
+    @Test("The App Store build never checks, even when asked from the menu")
+    func appStoreBuildNeverChecks() async throws {
+        let feed = HeldFeed()
+        let (service, preferences) = try makeService(distribution: .appStore, latest: { try await feed.fetch() })
+
+        #expect(service.updatesComeFromAppStore)
+        #expect(preferences.checksAutomatically)
+        service.checkAutomaticallyIfDue()
+        service.checkForUpdates()
+        service.downloadAndPrepare()
 
         #expect(service.phase == .idle)
         #expect(!service.isShowingSheet)

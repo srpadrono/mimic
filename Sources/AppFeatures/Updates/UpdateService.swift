@@ -58,6 +58,7 @@ final class UpdateService: UpdateSheetModel {
     }
 
     private let preferences: UpdatePreferences
+    private let distribution: DistributionChannel
     private let fetchLatestRelease: @Sendable () async throws -> UpdateRelease
     private let installer: any UpdateInstalling
     private let now: @Sendable () -> Date
@@ -93,6 +94,7 @@ final class UpdateService: UpdateSheetModel {
     init(
         installedVersion: @escaping @Sendable () -> ReleaseVersion,
         preferences: UpdatePreferences,
+        distribution: DistributionChannel = .current,
         fetchLatestRelease: @escaping @Sendable () async throws -> UpdateRelease = {
             try await UpdateFeedClient().latestRelease()
         },
@@ -107,6 +109,7 @@ final class UpdateService: UpdateSheetModel {
     ) {
         self.resolveInstalledVersion = installedVersion
         self.preferences = preferences
+        self.distribution = distribution
         self.fetchLatestRelease = fetchLatestRelease
         self.installer = installer
         self.now = now
@@ -122,6 +125,9 @@ final class UpdateService: UpdateSheetModel {
     /// An administrator turned updates off; see ``UpdatePreferences/updatesAreManaged``.
     var updatesAreManaged: Bool { preferences.updatesAreManaged }
 
+    /// The Mac App Store installs this build's updates, so Mimic neither checks nor offers any.
+    var updatesComeFromAppStore: Bool { distribution == .appStore }
+
     var checksAutomatically: Bool {
         get { preferences.checksAutomatically }
         set { preferences.checksAutomatically = newValue }
@@ -135,14 +141,14 @@ final class UpdateService: UpdateSheetModel {
     /// the menu item look broken.
     func checkForUpdates() {
         if case .installing = phase { return }
-        guard !updatesAreManaged else { return }
+        guard !updatesAreManaged, !updatesComeFromAppStore else { return }
         isShowingSheet = true
         startCheck(announceWhenUpToDate: true)
     }
 
     /// The background check. Silent unless it finds something being offered.
     func checkAutomaticallyIfDue() {
-        guard preferences.isAutomaticCheckDue(now: now()) else { return }
+        guard !updatesComeFromAppStore, preferences.isAutomaticCheckDue(now: now()) else { return }
         startCheck(announceWhenUpToDate: false)
     }
 
@@ -236,7 +242,7 @@ final class UpdateService: UpdateSheetModel {
     // MARK: - Downloading
 
     func downloadAndPrepare() {
-        guard !updatesAreManaged, case .available(let release) = phase else { return }
+        guard !updatesAreManaged, !updatesComeFromAppStore, case .available(let release) = phase else { return }
         let id = UUID()
         downloadID = id
         phase = .downloading(release, fraction: 0)

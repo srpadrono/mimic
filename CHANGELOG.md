@@ -5,6 +5,13 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- A Mac App Store build. `Scripts/package_app_store.sh` archives it, checks it, and exports or uploads
+  it. The store build has no update check of its own, because the App Store updates it, and no
+  `mimic` command. The GitHub installer and the Homebrew cask are unchanged.
+- The app carries a privacy manifest: no tracking and no data collected.
+
 ## [0.15.0] — 2026-10-14
 
 ### Added

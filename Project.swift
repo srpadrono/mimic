@@ -19,6 +19,11 @@ let sharedSettings: Settings = .settings(
         // Surfaced by `mimic state` as `appVersion`, so a caller can tell which build it is driving.
         "MARKETING_VERSION": "0.15.0",
         "CURRENT_PROJECT_VERSION": "1",
+        // YES only for the Mac App Store build, which Scripts/package_app_store.sh sets on its
+        // command line. The store updates that build itself, so it compiles without Mimic's own
+        // update check (`MIMIC_APP_STORE` in AppFeatures) and says so in its Info.plist.
+        "MIMIC_APP_STORE": "NO",
+        "MIMIC_APP_STORE_SWIFT_FLAGS_YES": "-DMIMIC_APP_STORE",
     ],
     configurations: [
         // Configs/Debug.xcconfig optionally includes an untracked Configs/Local.xcconfig, where a
@@ -230,6 +235,10 @@ let project = Project(
                 "ENABLE_APP_SANDBOX": "NO",
                 "ENABLE_HARDENED_RUNTIME": "NO",
                 "CODE_SIGN_IDENTITY": "-",
+                // The installer copies the built binary itself. Left installable, an archive of the
+                // Mimic scheme would carry /usr/local/bin/mimic beside the app, which makes it a
+                // generic archive the App Store cannot take.
+                "SKIP_INSTALL": "YES",
                 "PRODUCT_NAME": "mimic",
                 "PRODUCT_MODULE_NAME": "MimicCLI",
             ])
@@ -608,7 +617,13 @@ let project = Project(
                 .target(name: "ImportFeature"),
                 .target(name: "ProjectsFeature"),
                 .target(name: "UpdatesFeature"),
-            ]
+            ],
+            // Expands to `-DMIMIC_APP_STORE` when MIMIC_APP_STORE is YES and to nothing otherwise. A
+            // variable of its own rather than SWIFT_ACTIVE_COMPILATION_CONDITIONS on the command
+            // line, which would replace every target's conditions, the Swift packages' included.
+            settings: .settings(base: [
+                "OTHER_SWIFT_FLAGS": "$(inherited) $(MIMIC_APP_STORE_SWIFT_FLAGS_$(MIMIC_APP_STORE))",
+            ])
         ),
 
         // MimicUITests — UI test target for end-to-end journey tests
@@ -652,6 +667,11 @@ let project = Project(
                 "LSApplicationCategoryType": "public.app-category.developer-tools",
                 "CFBundleShortVersionString": "$(MARKETING_VERSION)",
                 "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
+                // Read by Scripts/package_app_store.sh to confirm it archived the store variant.
+                "MimicAppStoreBuild": "$(MIMIC_APP_STORE)",
+                // Mimic's only encryption is HTTPS to the backends it forwards to and SHA-256 checks,
+                // both standard and exempt, so App Store Connect asks no export questions per build.
+                "ITSAppUsesNonExemptEncryption": false,
             ]),
             buildableFolders: ["App/Sources", "App/Resources"],
             entitlements: .file(path: "App/Mimic.entitlements"),

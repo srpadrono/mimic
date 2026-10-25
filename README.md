@@ -21,6 +21,8 @@ brew install --cask srpadrono/tap/mimic
 
 Or download the [latest release](https://github.com/srpadrono/mimic/releases/latest) and run its signed `.pkg`. Either way, it installs `Mimic.app` in `/Applications` and `mimic` in `/usr/local/bin`. To build from source, see [Contributing](CONTRIBUTING.md).
 
+The [Mac App Store](docs/APP_STORE.md) version is the same app without the `mimic` command, because a store app cannot install one. The App Store updates it, so it has no Check for Updates item. Install from Homebrew or the `.pkg` if you want the command line.
+
 ### Check a download
 
 Releases after 0.14.0 are built by the [Release workflow](.github/workflows/release.yml) on GitHub's runners and carry a build provenance attestation and an SPDX SBOM. To confirm an installer was built from this repository at its tag:

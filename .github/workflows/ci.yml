@@ -374,15 +374,19 @@ jobs:
       # change to build settings, Tuist or a vendored manifest (`release_paths`), not on every full
       # run. A change to these two steps themselves first runs on the next nightly; start a full
       # run by hand to try it sooner.
-      - name: Build (Release)
+      #
+      # It builds as the Mac App Store archive, unsigned: the same Release compile of the app and the
+      # CLI, plus the checks App Store Connect would otherwise fail a week later (an app archive and
+      # not a generic one, the store variant, sandboxed, a privacy manifest). The GitHub installer
+      # differs only by MIMIC_APP_STORE, and the Release workflow builds that one for every tag.
+      - name: Build (Release, App Store archive)
         if: needs.plan.outputs.release == 'true'
         run: |
           set -o pipefail
-          mkdir -p .artifacts
-          xcodebuild -workspace Mimic.xcworkspace -scheme Mimic \
-            -configuration Release -derivedDataPath "$DERIVED_DATA" \
-            CODE_SIGN_IDENTITY=- build \
-            2>&1 | tee .artifacts/release-build.log
+          status=0
+          ./Scripts/package_app_store.sh || status=$?
+          cp .artifacts/app-store/archive.log .artifacts/release-build.log 2>/dev/null || true
+          exit "$status"
 
       - name: Release warnings (reported, never a gate)
         if: needs.plan.outputs.release == 'true'
