@@ -8,7 +8,7 @@ PROJECT_NAME="${ACME_PROJECT:-Acme Store}"
 JOURNEY_GROUP="Checkout QA"
 EXAMPLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-mimic() { "$MIMIC_BIN" "$@"; }
+mimic() { command "$MIMIC_BIN" "$@"; }
 
 die() { echo "error: $*" >&2; exit 1; }
 
