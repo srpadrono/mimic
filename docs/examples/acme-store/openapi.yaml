@@ -1,0 +1,229 @@
+openapi: 3.1.0
+info:
+  title: Acme Store API
+  version: 1.4.0
+  description: |
+    Three services behind one storefront. Each runs on its own host in production and on its own
+    local port in development: Auth (8080), Catalog (8081) and Payments (8082) when Mimic stands in
+    for them.
+
+    Client rules every Acme app must follow:
+
+    - **Retry 503 from Payments.** `POST /orders` may answer `503 payments_unavailable` with a
+      `Retry-After` header (seconds). Clients make up to **3 attempts in total**, waiting
+      `Retry-After` between them, before telling the customer.
+    - **Refresh, then retry once, on 401.** A `401 token_expired` from any service means the access
+      token lapsed. Call `POST /auth/refresh` and repeat the original request once with the new
+      token. If refresh answers 401, sign the customer out.
+    - **Never retry 402 or 409.** A declined card or a sold-out item needs the customer.
+    - **Timeouts.** Catalog calls give up after 4 seconds; show the offline state with a way to
+      retry.
+servers:
+  - url: http://127.0.0.1:8080
+    description: Auth
+  - url: http://127.0.0.1:8081
+    description: Catalog
+  - url: http://127.0.0.1:8082
+    description: Payments
+tags:
+  - name: Auth
+  - name: Catalog
+  - name: Payments
+paths:
+  /auth/login:
+    servers: [{ url: http://127.0.0.1:8080, description: Auth }]
+    post:
+      tags: [Auth]
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "401":
+          description: Wrong email or password.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: invalid_credentials, message: That email and password don't match. }
+  /auth/refresh:
+    servers: [{ url: http://127.0.0.1:8080, description: Auth }]
+    post:
+      tags: [Auth]
+      operationId: refresh
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        "200":
+          description: A new access token.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token]
+                properties:
+                  token: { type: string }
+        "401":
+          description: The refresh token expired too. Sign the customer out.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: refresh_expired, message: Sign in again. }
+  /products:
+    servers: [{ url: http://127.0.0.1:8081, description: Catalog }]
+    get:
+      tags: [Catalog]
+      operationId: listProducts
+      responses:
+        "200":
+          description: Everything for sale.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [products]
+                properties:
+                  products:
+                    type: array
+                    items: { $ref: "#/components/schemas/Product" }
+        "503":
+          description: Catalog is down for maintenance.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: maintenance, message: The catalog is being updated. Back in a few minutes. }
+  /products/{id}:
+    servers: [{ url: http://127.0.0.1:8081, description: Catalog }]
+    get:
+      tags: [Catalog]
+      operationId: getProduct
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: One product.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "404":
+          description: No such product.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /orders:
+    servers: [{ url: http://127.0.0.1:8082, description: Payments }]
+    post:
+      tags: [Payments]
+      operationId: placeOrder
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items, paymentMethod]
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    required: [productId, quantity]
+                    properties:
+                      productId: { type: string }
+                      quantity: { type: integer, minimum: 1 }
+                paymentMethod:
+                  type: string
+                  enum: [card_visa_4242, card_mastercard_5555]
+      responses:
+        "201":
+          description: Charged and placed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "401":
+          description: The access token expired. Refresh and retry once.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: token_expired, message: Your session has expired. }
+        "402":
+          description: The card was declined. Ask for another card; do not retry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: card_declined, message: Your card was declined. Try another card. }
+        "409":
+          description: An item sold out between adding it and paying. Nothing was charged.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: out_of_stock, message: Monstera just sold out., productId: p_plant }
+        "503":
+          description: Payments is busy. Nothing was charged. Retry after `Retry-After` seconds, 3 attempts in total.
+          headers:
+            Retry-After:
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: payments_unavailable, message: Payments is busy. }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+  schemas:
+    Session:
+      type: object
+      required: [token, refreshToken, user]
+      properties:
+        token: { type: string }
+        refreshToken: { type: string }
+        user:
+          type: object
+          required: [id, name]
+          properties:
+            id: { type: string }
+            name: { type: string }
+    Product:
+      type: object
+      required: [id, name, price, currency, stock, emoji]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        price: { type: number }
+        currency: { type: string }
+        stock: { type: integer }
+        emoji: { type: string }
+    Order:
+      type: object
+      required: [orderId, status, total, currency]
+      properties:
+        orderId: { type: string }
+        status: { type: string, enum: [paid] }
+        total: { type: number }
+        currency: { type: string }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        message: { type: string }
+        productId: { type: string }
