@@ -37,11 +37,20 @@ third try ever happens. The order is lost because the payment service was busy f
 Nobody catches this by hand, because you can't make a real payment provider return a `503` when you
 want one. Mimic sits between the app and its three backends, records one checkout, and then lets
 anyone (here, a Claude Code agent driving Mimic's CLI) script every way those backends can answer.
-The agent tests checkout against the spec, finds the one scenario that fails, makes a one-line fix,
-and shows every scenario passing.
+The agent tests checkout against the spec, finds what fails, fixes it, and shows every scenario
+passing.
 
-This is the same app and the same bug as the Mimic blog post "Close the loop: let your coding agent
-test what it builds", so keep the facts consistent with it.
+**It found a second bug nobody planted.** In the dry run on 29 October the agent planned 14
+scenarios, and 11 passed on the first run. It found the planted payments bug (a one-line fix) and
+a real one nobody knew about: when the session token expires, the catalog gets a `401` and the app
+never refreshes the token as the spec says it must (a fix of about 25 lines). After both fixes all
+14 passed. Tell that story. The second bug is the strongest moment in the video, because it shows
+the agent finding something nobody put there. Use the real counts from the filmed run, which may
+differ from the dry run.
+
+This is the same app as the Mimic blog post "Close the loop: let your coding agent test what it
+builds". The blog still says one bug and seven scenarios; note in your README the real numbers so
+the blog can be updated to match.
 
 ### What went wrong last time, so you don't repeat it
 
@@ -84,7 +93,12 @@ Every rule below exists to fix one of these.
 
 **If `~/MimicDemo/prep-done.md` exists**, an earlier session already did steps 0 to 2. Read it,
 check its claims quickly (`mimic ping`, the build, the baseline commit, the Remotion plugin), and
-go straight to step 3.
+go straight to step 3. Its "decision needed" about the second bug is settled: tell the two-bug
+story described above. The Mimic CLI only reaches the app from Ghostty (it has Full Disk Access),
+and computer use can't type into Ghostty, so start Ghostty commands with `osascript` or
+`open -a Ghostty --args -e ...`, or ask me to type a command if nothing else works. For the agent take, start it
+so no typing is needed: launch Ghostty in `~/MimicDemo/acme-store` running
+`claude "$(cat qa/QA_PROMPT.md)"`, which gives the agent the QA prompt as its first message.
 
 ## 0. Check the Mac (no screen control)
 
@@ -178,10 +192,10 @@ kill %1                         # from here on Mimic answers everything
 ```
 
 Then start the filmed agent the same way you will on camera (step 4) and let it run to the end with
-no help. Expected: it reads the recorded log, `openapi.yaml` and `Store.swift`, plans about seven
-scenarios, creates them as journeys in the group "Checkout QA", runs each with `mimic/run.sh`, finds
-that "payments busy" fails (two `POST /orders`, not three), changes the condition, rebuilds, and
-reruns everything green.
+no help. Expected: it reads the recorded log, `openapi.yaml` and `Store.swift`, plans its
+scenarios (14 in the first dry run), creates them as journeys in the group "Checkout QA", runs each
+with `mimic/run.sh`, finds that "payments busy" fails (two `POST /orders`, not three) and that the
+catalog doesn't refresh an expired token, fixes both, rebuilds, and reruns everything green.
 
 Write down what really happened and how long each phase took. If it stalls, asks questions, or hits
 permission prompts, fix the setup (settings, prompt wording, build) and dry-run again. Don't fix it
@@ -274,7 +288,7 @@ level), the exact on-screen text you'll highlight, and the narration line. Take 
 from the recordings, never from memory. Made-up UI text is the clearest sign of a fake demo. Then
 build one scene at a time, render one still per scene, and look at it before you go on.
 
-**Length and format.** 70 to 90 seconds. 1920 × 1080 at 60 fps (screen footage looks smoother at
+**Length and format.** 75 to 95 seconds. 1920 × 1080 at 60 fps (screen footage looks smoother at
 60), H.264 High, yuv420p, bt709 tags, AAC 48 kHz, `+faststart`. If the sources are Retina, also
 render a 3840 × 2160 master.
 
@@ -286,10 +300,11 @@ render a 3840 × 2160 master.
 | 0:07 to 0:14 | Cut to `openapi.yaml` in an editor, already framed on the line "Clients make up to 3 attempts in total", with that line highlighted. | The spec says three. You can't make a real payment service return a 503 on cue, so this kind of bug ships. |
 | 0:14 to 0:24 | `a-record`: the checkout passing through Mimic, the log filling with forwarded calls, the endpoints appearing. | Mimic sits between the app and its three backends. One checkout through it, and it holds a response for every call. |
 | 0:24 to 0:50 | `b-agent`, sped up with eased ramps: the prompt going in, the agent's scenario table, `mimic journey create` and `step add` commands, and the journeys appearing in Mimic's navigator as it creates them. Then the runs, one after another, with the network strip changing each time. | I give checkout to Claude Code. It reads the spec, the recording and the code, and scripts each case as a Mimic journey from the command line. It runs the app through all of them. |
-| 0:50 to 0:58 | Real speed. The failing run's output, the request log with two `POST /orders`, the agent saying why. | One fails: two attempts, not three. |
-| 0:58 to 1:06 | The agent's diff, zoomed in the terminal so it's readable. Use a code card only if the terminal can't be read, and then only the verbatim lines. | The fix is one line. |
-| 1:06 to 1:16 | `d-fixed`: 503, 503, 201, "Order placed". Mimic's journey shows every step served. Then the agent's final table. | Same journey again: busy, busy, paid. All of them pass. |
-| 1:16 to 1:24 | End card. | Mimic. Free and open source, for the Mac. |
+| 0:50 to 0:56 | Real speed. The payments run's output, the request log with two `POST /orders`, the agent saying why. | The payments one fails, as expected: two attempts, not three. |
+| 0:56 to 1:06 | Real speed. The expired-session run: `GET /products` answering 401 in the network strip and the log, no `POST /auth/refresh` after it, and the agent's line explaining it. | Then one I didn't know about. When the session expires, the catalog never refreshes the token. |
+| 1:06 to 1:14 | The agent's two diffs, zoomed in the terminal so they're readable: the one-line retry change, then the token refresh. Use a code card only if the terminal can't be read, and then only verbatim lines. | One line for the retry, a few more for the refresh. |
+| 1:14 to 1:24 | `d-fixed`: 503, 503, 201, "Order placed". Mimic's journey shows every step served. Then the agent's final table, all passing. | Same journey again: busy, busy, paid. All fourteen pass. |
+| 1:24 to 1:30 | End card. | Mimic. Free and open source, for the Mac. |
 
 Open on the bug, not on a logo or a title. The first frame should already be the app, and with the
 sound off it should read like a headline: a red banner in a checkout. Videos that open on a title
@@ -360,9 +375,11 @@ real numbers, not to read as is:
 > Then I hand checkout to Claude Code. It reads the spec, the recording and the app code, and
 > scripts each case as a Mimic journey: a declined card, an expired session, an item that sells
 > out, a slow catalog, payments busy.
-> It runs the app through every one. One fails. Two attempts at the order, not three.
-> The fix is one line.
-> Same journey again. Busy, busy, paid. All seven pass.
+> It runs the app through every one. Payments busy fails: two attempts at the order, not three.
+> Then one I didn't plant. When the session expires, the catalog gets a four-oh-one and never
+> refreshes the token.
+> One line fixes the retry. A few more fix the refresh.
+> Same journey again. Busy, busy, paid. All fourteen pass.
 > Mimic is free and open source, for the Mac.
 
 Keep it to about 150 words for 80 seconds (around 140 words a minute, with room to breathe).
