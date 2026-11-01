@@ -1,5 +1,5 @@
 #!/bin/bash
-# The reference answer: the seven Checkout scenarios as Mimic journeys.
+# The reference answer: eight Checkout scenarios as Mimic journeys.
 #
 # An agent doing the QA prompt should arrive at something close to this on its own, from the
 # recording, the app code and openapi.yaml. Keep it out of the agent's context; it is here so a
@@ -60,6 +60,13 @@ step "$J" GET /products --backend "$CATALOG" --status 200 --delay 2500 --body-fi
 J="Checkout: catalog offline, then back"
 journey "$J" "The catalog never answers (the app gives up after 4 s); Retry loads it and checkout completes."
 step "$J" GET /products --backend "$CATALOG" --fail timeout --hold-ms 6000
+step "$J" GET /products --backend "$CATALOG" --status 200 --body-file "$BODIES/products.json"
+
+J="Checkout: session expires while browsing"
+journey "$J" "401 token_expired on the catalog; the app refreshes the token and loads the products again."
+step "$J" GET /products --backend "$CATALOG" --status 401 \
+  --body '{"error":"token_expired","message":"Your session has expired."}'
+step "$J" POST /auth/refresh --backend primary --status 200 --body '{"token":"tok_live_refreshed"}'
 step "$J" GET /products --backend "$CATALOG" --status 200 --body-file "$BODIES/products.json"
 
 echo "Created the Checkout QA journeys. Run one with: mimic/run.sh \"Checkout: payments busy, then paid\""
