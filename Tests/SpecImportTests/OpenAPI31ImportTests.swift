@@ -108,6 +108,33 @@ struct OpenAPI31ImportTests {
         #expect(try object(candidate.responseBody)["state"] as? String == "ready")
     }
 
+    @Test("A 3.2 example's serializedValue is served as written, even beside a dataValue")
+    func prefersOpenAPI32SerializedValue() async throws {
+        let spec = #"""
+        {
+          "openapi": "3.2.0",
+          "info": { "title": "Examples", "version": "1" },
+          "paths": {
+            "/status": {
+              "get": {
+                "responses": {
+                  "200": {
+                    "description": "OK",
+                    "content": { "application/json": { "examples": { "ready": {
+                      "dataValue": { "state": "ready" },
+                      "serializedValue": "{\"state\":\"ready\"}"
+                    } } } }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """#
+        let candidate = try #require(try await OpenAPIParser.parse(data: Data(spec.utf8)).first)
+        #expect(candidate.responseBody == #"{"state":"ready"}"#)
+    }
+
     @Test("A 3.1 route with a suffix after its parameter imports as written and answers requests")
     func importsPartialSegmentRouteFrom31() async throws {
         let spec = """

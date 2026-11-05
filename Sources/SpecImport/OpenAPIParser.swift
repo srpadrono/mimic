@@ -566,12 +566,14 @@ public enum OpenAPIParser {
         }
     }
 
-    /// An example's inline value: 3.0/3.1 `value` or 3.2 `dataValue`. An `externalValue` names a
-    /// file elsewhere, so it is skipped like any other example Mimic cannot read; a 3.2
-    /// `serializedValue` is the body already written out.
+    /// An example's body. A 3.2 `serializedValue` is the body exactly as sent, so it wins over a
+    /// `dataValue` given beside it (a form-encoded body, say, whose data would otherwise come out as
+    /// JSON). Otherwise the 3.0/3.1 `value` or 3.2 `dataValue` is encoded. An `externalValue` names a
+    /// file elsewhere, so it is skipped like any other example Mimic cannot read.
     private static func exampleBody(_ example: OpenAPI.Example, contentType: Scenario.ContentType) -> String? {
-        if let data = example.value?.value { return jsonString(from: data, contentType: contentType) }
-        return example.serializedValue
+        if let serialized = example.serializedValue { return serialized }
+        guard let data = example.value?.value else { return nil }
+        return jsonString(from: data, contentType: contentType)
     }
 
     private static func jsonString(from anyCodable: AnyCodable, contentType: Scenario.ContentType) -> String? {
