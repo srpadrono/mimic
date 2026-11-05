@@ -6,6 +6,7 @@ Mimic is a native macOS app that runs local mock API servers. Define endpoints a
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-blue)](https://developer.apple.com/macos/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/srpadrono/mimic/badge)](https://scorecard.dev/viewer/?uri=github.com/srpadrono/mimic)
 [![Line Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsrpadrono%2Fmimic%2Fbadges%2Fapp-coverage.json)](#testing)
 [![Module Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsrpadrono%2Fmimic%2Fbadges%2Fmodule-coverage.json)](#testing)
 

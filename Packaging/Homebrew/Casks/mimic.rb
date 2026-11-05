@@ -1,5 +1,6 @@
-# Source of truth for srpadrono/homebrew-tap's Casks/mimic.rb. Copy it there after each release with
-# the version and the sha256 the Release workflow prints in its summary (CONTRIBUTING ▸ Releases).
+# Source of truth for srpadrono/homebrew-tap's Casks/mimic.rb. Publishing a release opens the tap's
+# pull request with this file at the tag, with only `version` and `sha256` replaced
+# (.github/workflows/homebrew-tap.yml, CONTRIBUTING ▸ Releases). Keep both lines' shape.
 cask "mimic" do
   version "0.15.0"
   sha256 "b7edb065aab7e2c31a1f8981eb41903dd4cfd729439999e1327e9067755939ac"
