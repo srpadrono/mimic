@@ -267,11 +267,11 @@ struct OpenAPIParserTests {
         #expect(candidates.first { $0.path == "/boolean" }?.responseBody == "false")
     }
 
-    @Test("Partial-segment templates are refused instead of creating dead routes", arguments: [
+    @Test("Partial-segment templates import as written", arguments: [
         "/files/{name}.json", "/v{major}/users", "/range/{from}-{to}",
     ])
-    func partialTemplatesAreRefused(path: String) async {
-        for (format, version) in [("openapi", "3.0.3"), ("swagger", "2.0")] {
+    func partialTemplatesImport(path: String) async throws {
+        for (format, version) in [("openapi", "3.0.3"), ("openapi", "3.1.0"), ("swagger", "2.0")] {
             let spec = """
             {
                 "\(format)": "\(version)",
@@ -281,11 +281,30 @@ struct OpenAPIParserTests {
                 }
             }
             """
+            let candidates = try await OpenAPIParser.parse(data: Data(spec.utf8))
+            #expect(candidates.map(\.path) == [path], "\(format) \(version)")
+        }
+    }
+
+    @Test("Unpaired braces are refused instead of creating dead routes", arguments: [
+        "/files/{name.json", "/files/name}.json", "/files/{a{b}}", "/x/{unclosed",
+    ])
+    func unpairedBracesAreRefused(path: String) async {
+        for (format, version) in [("openapi", "3.0.3"), ("swagger", "2.0")] {
+            let spec = """
+            {
+                "\(format)": "\(version)",
+                "info": { "title": "Broken template", "version": "1.0" },
+                "paths": {
+                    "\(path)": { "get": { "responses": { "200": { "description": "OK" } } } }
+                }
+            }
+            """
             do {
                 _ = try await OpenAPIParser.parse(data: Data(spec.utf8))
                 Issue.record("\(format) must not import a route it cannot match: \(path)")
             } catch {
-                #expect(error.localizedDescription.contains("a path parameter must occupy an entire segment"))
+                #expect(error.localizedDescription.contains("must close with a '}'"))
                 #expect(error.localizedDescription.contains(path))
             }
         }

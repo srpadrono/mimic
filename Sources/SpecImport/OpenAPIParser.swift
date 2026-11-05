@@ -1,6 +1,6 @@
 import Foundation
 import Domain
-import OpenAPIKit30
+import OpenAPIKit
 
 private enum OpenAPIImportError: LocalizedError {
     case unresolvedResponse(String)
@@ -17,12 +17,12 @@ private enum OpenAPIImportError: LocalizedError {
         case .unsupportedPathItem(let reference):
             return "Path item reference \(reference) is not supported. Inline the referenced path item before importing."
         case .unsupportedPathTemplate(let path):
-            return "Cannot import path \(path): a path parameter must occupy an entire segment."
+            return "Cannot import path \(path): every '{' in a path must close with a '}' around a parameter name."
         }
     }
 }
 
-/// Parses OpenAPI v3 and Swagger v2 specs into import candidates.
+/// Parses OpenAPI 3.0, 3.1 and 3.2 and Swagger 2 specs into import candidates.
 public enum OpenAPIParser {
 
     /// Parse OpenAPI v3 or Swagger v2 JSON data into import candidates.
@@ -35,13 +35,15 @@ public enum OpenAPIParser {
         let parsing = Task.detached {
             try Task.checkCancellation()
             // Peek at the JSON to detect spec version
-            if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let swagger = dict["swagger"] as? String, swagger.hasPrefix("2") {
+            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            if let swagger = dict?["swagger"] as? String, swagger.hasPrefix("2") {
                 return try parseSwagger2(data: data, existingEndpoints: existingEndpoints)
             }
             // Default: try OpenAPI 3.x
             try Task.checkCancellation()
-            let document = try JSONDecoder().decode(OpenAPI.Document.self, from: data)
+            let document = try OpenAPIDocumentDecoder.decode(
+                data, declaredVersion: dict?["openapi"] as? String
+            )
             return try candidatesFromDocument(
                 document,
                 existingEndpoints: existingEndpoints
@@ -64,13 +66,12 @@ public enum OpenAPIParser {
         return server.urlTemplate.replacing(defaults).rawValue
     }
 
-    /// Domain matches whole-segment parameters. Keeping a partial template as a literal would
-    /// create a mock that can never answer the concrete requests this specification describes.
+    /// Domain matches whole-segment parameters and `{name}` templates inside a segment, such as
+    /// `/airport/{iata}.json`. A brace it cannot pair would be stored as literal text, a mock that
+    /// can never answer the requests this specification describes, so the import is refused.
     private static func validatePathTemplate(_ path: String) throws {
         for segment in path.split(separator: "/") where segment.contains("{") || segment.contains("}") {
-            let parameter = segment.dropFirst().dropLast()
-            guard segment.first == "{", segment.last == "}", !parameter.isEmpty,
-                  !parameter.contains("{"), !parameter.contains("}")
+            guard PathPattern.isTemplate(segment: String(segment))
             else { throw OpenAPIImportError.unsupportedPathTemplate(path) }
         }
     }
@@ -477,8 +478,13 @@ public enum OpenAPIParser {
                 ImportCandidateBuilder.detectContentType($0.rawValue) == .json
             })
             ?? sortedContentKeys.first,
-           let selectedContent = response.content[selectedKey] {
+           let contentEither = response.content[selectedKey] {
             contentType = ImportCandidateBuilder.detectContentType(selectedKey.rawValue)
+            // OpenAPI 3.2 lets a media type be a reference into `components.mediaTypes`. One that
+            // does not resolve leaves no body, rather than a generated one for a shape never read.
+            guard let selectedContent = resolvedContent(contentEither, in: document) else {
+                return (statusCode, nil, contentType, [:])
+            }
             allowsMetadataFallback = selectedContent.schema == nil
                 && selectedContent.example == nil
                 && (selectedContent.examples?.isEmpty ?? true)
@@ -521,19 +527,11 @@ public enum OpenAPIParser {
                 switch exampleRef {
                 case .a(let ref):
                     if let resolved = try? document.components.lookup(ref),
-                       let value = resolved.value {
-                        switch value {
-                        case .a: continue
-                        case .b(let anyCodable): return jsonString(from: anyCodable, contentType: contentType)
-                        }
+                       let body = exampleBody(resolved, contentType: contentType) {
+                        return body
                     }
                 case .b(let example):
-                    if let value = example.value {
-                        switch value {
-                        case .a: continue
-                        case .b(let anyCodable): return jsonString(from: anyCodable, contentType: contentType)
-                        }
-                    }
+                    if let body = exampleBody(example, contentType: contentType) { return body }
                 }
             }
         }
@@ -544,16 +542,10 @@ public enum OpenAPIParser {
         }
 
         // Generate from schema when no usable example exists.
-        if let schemaEither = content.schema {
-            let resolvedSchema: JSONSchema?
-            switch schemaEither {
-            case .a(let ref):
-                resolvedSchema = try? document.components.lookup(ref)
-            case .b(let schema):
-                resolvedSchema = schema
-            }
-            if let schema = resolvedSchema,
-               let generated = SchemaExampleGenerator.generate(from: schema, in: document) {
+        // In 3.1 a `$ref` schema is a `.reference` case of the schema itself, which the generator
+        // resolves against the document.
+        if let schema = content.schema {
+            if let generated = SchemaExampleGenerator.generate(from: schema, in: document) {
                 if contentType == .plainText, let text = generated as? String {
                     return text
                 }
@@ -562,6 +554,24 @@ public enum OpenAPIParser {
         }
 
         return nil
+    }
+
+    private static func resolvedContent(
+        _ content: Either<OpenAPI.Reference<OpenAPI.Content>, OpenAPI.Content>,
+        in document: OpenAPI.Document
+    ) -> OpenAPI.Content? {
+        switch content {
+        case .a(let ref): try? document.components.lookup(ref)
+        case .b(let content): content
+        }
+    }
+
+    /// An example's inline value: 3.0/3.1 `value` or 3.2 `dataValue`. An `externalValue` names a
+    /// file elsewhere, so it is skipped like any other example Mimic cannot read; a 3.2
+    /// `serializedValue` is the body already written out.
+    private static func exampleBody(_ example: OpenAPI.Example, contentType: Scenario.ContentType) -> String? {
+        if let data = example.value?.value { return jsonString(from: data, contentType: contentType) }
+        return example.serializedValue
     }
 
     private static func jsonString(from anyCodable: AnyCodable, contentType: Scenario.ContentType) -> String? {

@@ -162,33 +162,138 @@ public enum JourneyResolver {
 }
 
 /// Path matching shared by endpoints and journey steps: `/` separated segments where a `:name`
-/// segment matches anything. Returns the number of literal segments matched so callers can rank
-/// competing patterns by specificity.
+/// segment matches anything, and a segment holding `{name}` templates matches its literal text
+/// around them, as OpenAPI writes `/airport/{iata}.json` or `/v{major}`. Returns the number of
+/// literal segments matched so callers can rank competing patterns by specificity.
 public enum PathPattern {
+    /// How specifically a pattern matched one request: whole literal segments first, then
+    /// segments that mix literal text with `{name}` templates. `/files/{name}.json` therefore
+    /// outranks `/files/:name` for `/files/a.json`, and loses to `/files/index.json`.
+    public struct Rank: Sendable, Equatable {
+        public let literalSegments: Int
+        public let templateSegments: Int
+    }
+
     /// Identity for patterns that match the same paths with the same specificity. Empty slash
     /// segments and wildcard names do not affect matching. Literal Unicode and its UTF-8 URL
     /// encoding share an identity; encoded reserved characters retain their meaning as data.
     public static func matchingKey(for pattern: String) -> [String] {
-        segments(in: pattern.utf8).map { $0.hasPrefix(":") ? ":" : literalKey($0) }
+        segments(in: pattern.utf8).map { segment in
+            if segment.hasPrefix(":") { return ":" }
+            // A literal key never holds a raw brace, so a template key cannot equal one.
+            if let template = SegmentTemplate(segment) { return template.key }
+            return literalKey(segment)
+        }
     }
 
-    public static func specificity(requestPath: String, pattern: String) -> Int? {
+    /// Whether a segment is a `{name}` template this matcher can act on. A brace it cannot pair
+    /// leaves the segment literal, which is how a spec importer tells a route it can serve from one
+    /// it would only store.
+    public static func isTemplate(segment: String) -> Bool {
+        !segment.hasPrefix(":") && SegmentTemplate(segment) != nil
+    }
+
+    public static func rank(requestPath: String, pattern: String) -> Rank? {
         // Query strings never participate in matching.
         let requestSegments = segments(in: requestPath.utf8.prefix { $0 != 0x3F })
         let patternSegments = segments(in: pattern.utf8)
         guard requestSegments.count == patternSegments.count else { return nil }
 
         var literalMatches = 0
+        var templateMatches = 0
         for (requestSegment, patternSegment) in zip(requestSegments, patternSegments) {
             if patternSegment.hasPrefix(":") { continue }
+            if let template = SegmentTemplate(patternSegment) {
+                guard template.matches(literalKey(requestSegment)) else { return nil }
+                templateMatches += 1
+                continue
+            }
             if literalKey(requestSegment) != literalKey(patternSegment) { return nil }
             literalMatches += 1
         }
-        return literalMatches
+        return Rank(literalSegments: literalMatches, templateSegments: templateMatches)
+    }
+
+    public static func specificity(requestPath: String, pattern: String) -> Int? {
+        rank(requestPath: requestPath, pattern: pattern)?.literalSegments
     }
 
     public static func matches(requestPath: String, pattern: String) -> Bool {
-        specificity(requestPath: requestPath, pattern: pattern) != nil
+        rank(requestPath: requestPath, pattern: pattern) != nil
+    }
+
+    /// One segment such as `{iata}.json`, `v{major}` or `{from}-{to}`: literal runs, compared in
+    /// their normalized spelling, and parameters that each take at least one character.
+    private struct SegmentTemplate {
+        private enum Part { case literal([String]), parameter }
+        private let parts: [Part]
+        let key: String
+
+        /// `nil` unless every brace pairs up and at least one parameter is present.
+        init?(_ segment: String) {
+            guard segment.contains("{") else { return nil }
+            var parts: [Part] = []
+            var key = ""
+            var rest = Substring(segment)
+            while !rest.isEmpty {
+                guard let open = rest.firstIndex(of: "{") else {
+                    guard !rest.contains("}") else { return nil }
+                    parts.append(.literal(Self.units(literalKey(rest))))
+                    key += literalKey(rest)
+                    break
+                }
+                let text = rest[..<open]
+                guard !text.contains("}") else { return nil }
+                if !text.isEmpty {
+                    parts.append(.literal(Self.units(literalKey(text))))
+                    key += literalKey(text)
+                }
+                let afterOpen = rest[rest.index(after: open)...]
+                guard let close = afterOpen.firstIndex(of: "}"),
+                      !afterOpen[..<close].contains("{") else { return nil }
+                parts.append(.parameter)
+                key += "{}"
+                rest = afterOpen[afterOpen.index(after: close)...]
+            }
+            self.parts = parts
+            self.key = key
+        }
+
+        /// Walks the set of positions the parts so far can end at, so adjacent parameters cost
+        /// linear work rather than one backtracking branch per split.
+        func matches(_ normalizedSegment: String) -> Bool {
+            let units = Self.units(normalizedSegment)
+            var positions: Set<Int> = [0]
+            for part in parts {
+                switch part {
+                case .literal(let literal):
+                    positions = Set(positions.compactMap { start in
+                        let end = start + literal.count
+                        guard end <= units.count, Array(units[start..<end]) == literal else { return nil }
+                        return end
+                    })
+                case .parameter:
+                    guard let earliest = positions.min(), earliest < units.count else { return false }
+                    positions = Set((earliest + 1)...units.count)
+                }
+                if positions.isEmpty { return false }
+            }
+            return positions.contains(units.count)
+        }
+
+        /// A normalized segment in characters as a URL carries them: `%XX` is one unit, so a
+        /// parameter boundary can never fall inside an escape.
+        private static func units(_ normalized: String) -> [String] {
+            let bytes = Array(normalized.utf8)
+            var units: [String] = []
+            var index = 0
+            while index < bytes.count {
+                let width = bytes[index] == 0x25 && index + 2 < bytes.count ? 3 : 1
+                units.append(String(decoding: bytes[index..<(index + width)], as: UTF8.self))
+                index += width
+            }
+            return units
+        }
     }
 
     /// ASCII URL delimiters remain delimiters even beside a Unicode combining mark.

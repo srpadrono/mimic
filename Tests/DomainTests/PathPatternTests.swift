@@ -5,7 +5,7 @@ import Testing
 struct PathPatternTests {
     @Test("Literal routes match the URL-encoded request that clients send", arguments: [
         ("/café", "/caf%C3%A9"),
-        ("/literal{brace}", "/literal%7Bbrace%7D"),
+        ("/literal%7Bbrace%7D", "/literal%7Bbrace%7D"),
         ("/雪/😀", "/%E9%9B%AA/%F0%9F%98%80"),
         ("/caf%c3%a9", "/caf%C3%A9"),
         ("/percent%", "/percent%25"),

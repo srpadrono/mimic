@@ -136,8 +136,11 @@ enum ImportCandidateBuilder {
                 // `pet`, so a spec that supplies no `summary` and no `operationId` gets "Get Pet"
                 // rather than the parameter — which, before the route rewrite, arrived here with
                 // its braces still on and was just as wrong.
+                // A `{name}.json` template is a parameter with a suffix, so it names no resource
+                // either.
                 return !isCommonPrefix
                     && !segment.hasPrefix(ImportPath.wildcardMarker)
+                    && !PathPattern.isTemplate(segment: segment)
                     && !segment.allSatisfy(\.isNumber)
             }
     }

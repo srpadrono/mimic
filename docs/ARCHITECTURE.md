@@ -7,7 +7,7 @@ Mimic runs a Vapor mock server inside the macOS app process. The UI and control 
 | Term | Meaning |
 | --- | --- |
 | Project (`MockProject`) | Saved endpoints, journeys, and server configuration. |
-| Endpoint | Method and path, optionally scoped to a backend, with one active scenario. Literal path segments outrank `:param` wildcards. |
+| Endpoint | Method and path, optionally scoped to a backend, with one active scenario. Literal path segments outrank `{param}` templates such as `{id}.json`, which outrank `:param` wildcards. |
 | Scenario | A response choice for an endpoint: status, headers, body, and content type. |
 | Journey | An ordered set of steps that overlays endpoints; at most one is active per project. Unscripted requests can fall through to endpoints. |
 | Journey step | A response, connection drop, or timeout, optionally repeated. |

@@ -105,15 +105,20 @@ public struct MatchSpecificity: Comparable, Sendable, Equatable {
     public let matchedOperation: Bool
     /// Literal (non-`:wildcard`) path segments matched.
     public let literalSegments: Int
+    /// Segments matched by a `{name}` template with literal text beside it, such as `{id}.json`.
+    /// They break a tie on literal segments: more specific than `:id`, less than a literal.
+    public let templateSegments: Int
 
-    public init(matchedOperation: Bool, literalSegments: Int) {
+    public init(matchedOperation: Bool, literalSegments: Int, templateSegments: Int = 0) {
         self.matchedOperation = matchedOperation
         self.literalSegments = literalSegments
+        self.templateSegments = templateSegments
     }
 
     public static func < (lhs: MatchSpecificity, rhs: MatchSpecificity) -> Bool {
         if lhs.matchedOperation != rhs.matchedOperation { return !lhs.matchedOperation }
-        return lhs.literalSegments < rhs.literalSegments
+        if lhs.literalSegments != rhs.literalSegments { return lhs.literalSegments < rhs.literalSegments }
+        return lhs.templateSegments < rhs.templateSegments
     }
 }
 
@@ -164,13 +169,17 @@ public enum RequestMatcher {
         for endpoint in endpoints {
             guard endpoint.backendID == request.backendID else { continue }
             guard endpoint.method == request.method else { continue }
-            guard let segments = PathPattern.specificity(requestPath: request.path, pattern: endpoint.path) else { continue }
+            guard let rank = PathPattern.rank(requestPath: request.path, pattern: endpoint.path) else { continue }
             guard let matchedOperation = operationLookup.specificity(declared: endpoint.graphqlOperation)
             else { continue }
             guard let activeID = endpoint.activeScenarioID else { continue }
             guard let scenario = endpoint.scenarios.first(where: { $0.id == activeID }) else { continue }
 
-            let specificity = MatchSpecificity(matchedOperation: matchedOperation, literalSegments: segments)
+            let specificity = MatchSpecificity(
+                matchedOperation: matchedOperation,
+                literalSegments: rank.literalSegments,
+                templateSegments: rank.templateSegments
+            )
             // `best.map { … } ?? true` rather than `best == nil || specificity > best!.specificity`.
             // The force-unwrap was safe by short-circuit, but this is the request-serving hot path in
             // an in-process server, where a `!` that stops being safe is a crash of the whole app

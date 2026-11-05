@@ -18,7 +18,7 @@ The second account-summary call succeeds because the cursor has advanced. Try th
 | `orderedPerEndpoint` (default) | A request may consume the earliest matching unexhausted step at or after the cursor, even if another route's earlier step remains pending. |
 | `strictSequence` | Only the current step may match; another request follows `unmatchedBehavior` and leaves the cursor unchanged. |
 
-Path segments use endpoint matching rules, including `:param` wildcards. Query strings are not match criteria. GraphQL steps can also name an operation. Set `unmatchedBehavior` to `notFound` when an unscripted call should fail with `404` instead of falling through.
+Path segments use endpoint matching rules, including `:param` wildcards and `{param}` templates. Query strings are not match criteria. GraphQL steps can also name an operation. Set `unmatchedBehavior` to `notFound` when an unscripted call should fail with `404` instead of falling through.
 
 ## Step outcomes and progression
 

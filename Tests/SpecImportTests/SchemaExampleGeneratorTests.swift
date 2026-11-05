@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-import OpenAPIKit30
+import OpenAPIKit
 @testable import SpecImport
 
 @Suite("SchemaExampleGenerator")
@@ -644,20 +644,37 @@ extension SwaggerParameter {
     }
 }
 
+// Fixtures are written as OpenAPI 3.0, the version most of these behaviours were reported
+// against. The generator reads OpenAPIKit's 3.1 model, so each fixture takes the path a 3.0
+// import takes: decoded as 3.0 and converted, inside a minimal document.
+private func convertedFixture(components: String) throws -> OpenAPI.Document {
+    try OpenAPIDocumentDecoder.decode(Data("""
+    { "openapi": "3.0.0", "info": { "title": "Fixture", "version": "1" }, "paths": {},
+      "components": \(components) }
+    """.utf8), declaredVersion: "3.0.0")
+}
+
+private struct MissingFixture: Error {}
+
 extension JSONSchema {
     static func make(_ json: String) throws -> JSONSchema {
-        try JSONDecoder().decode(JSONSchema.self, from: Data(json.utf8))
+        let document = try convertedFixture(components: #"{ "schemas": { "fixture": \#(json) } }"#)
+        guard let schema = document.components.schemas["fixture"] else { throw MissingFixture() }
+        return schema
     }
 }
 
 extension OpenAPI.Document {
     static func make(_ json: String) throws -> OpenAPI.Document {
-        try JSONDecoder().decode(OpenAPI.Document.self, from: Data(json.utf8))
+        let version = (try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])?["openapi"]
+        return try OpenAPIDocumentDecoder.decode(Data(json.utf8), declaredVersion: version as? String)
     }
 }
 
 extension OpenAPI.Parameter {
     static func make(_ json: String) throws -> OpenAPI.Parameter {
-        try JSONDecoder().decode(OpenAPI.Parameter.self, from: Data(json.utf8))
+        let document = try convertedFixture(components: #"{ "parameters": { "fixture": \#(json) } }"#)
+        guard case .b(let parameter)? = document.components.parameters["fixture"] else { throw MissingFixture() }
+        return parameter
     }
 }
