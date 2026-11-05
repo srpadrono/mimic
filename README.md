@@ -2,6 +2,8 @@
 
 Mimic is a native macOS app that runs local mock API servers. Define endpoints and responses, switch scenarios, script multi-request journeys, simulate failures, and inspect live traffic. A CLI and a token-protected loopback API let tests and agents drive the same project without clicking through the window.
 
+**Website:** [mimic-mock.app](https://mimic-mock.app) · **Blog:** [mimic-mock.app/blog](https://mimic-mock.app/blog)
+
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-blue)](https://developer.apple.com/macos/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/srpadrono/mimic/badge)](https://scorecard.dev/viewer/?uri=github.com/srpadrono/mimic)
