@@ -2,8 +2,8 @@
 # pull request with this file at the tag, with only `version` and `sha256` replaced
 # (.github/workflows/homebrew-tap.yml, CONTRIBUTING ▸ Releases). Keep both lines' shape.
 cask "mimic" do
-  version "0.15.0"
-  sha256 "b7edb065aab7e2c31a1f8981eb41903dd4cfd729439999e1327e9067755939ac"
+  version "0.16.0"
+  sha256 "d3de83c51d532413eb18526d4c1c467fb8d10a9ac5cb865f6ba4dee60a49946e"
 
   url "https://github.com/srpadrono/mimic/releases/download/v#{version}/Mimic-#{version}.pkg"
   name "Mimic"
