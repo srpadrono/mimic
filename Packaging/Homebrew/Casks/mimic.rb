@@ -7,7 +7,7 @@ cask "mimic" do
   url "https://github.com/srpadrono/mimic/releases/download/v#{version}/Mimic-#{version}.pkg"
   name "Mimic"
   desc "Local mock API server with a native app and CLI"
-  homepage "https://github.com/srpadrono/mimic"
+  homepage "https://mimic-mock.app"
 
   livecheck do
     url :url
