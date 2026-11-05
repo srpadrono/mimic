@@ -1,5 +1,5 @@
 {
-  "originHash" : "2859476b2578000416ff2396ab20b9aedc03d435ba5c52c4aabc00545468b1a6",
+  "originHash" : "1800752b581c0a27241d656564023befa7d5bfa95b4d531d326b9d38fb580de7",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -33,8 +33,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/groue/GRDB.swift.git",
       "state" : {
-        "revision" : "b83108d10f42680d78f23fe4d4d80fc88dab3212",
-        "version" : "7.11.1"
+        "revision" : "92a554cd0d5e8d67cb18993c6054e73fe42c066c",
+        "version" : "7.12.0"
       }
     },
     {
@@ -213,8 +213,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-nio-extras.git",
       "state" : {
-        "revision" : "abcf5312eb8ed2fb11916078aef7c46b06f20813",
-        "version" : "1.33.0"
+        "revision" : "8e1249b29f92574e05e0d91637f239e378a9a95b",
+        "version" : "1.35.2"
       }
     },
     {
