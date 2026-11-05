@@ -179,9 +179,9 @@ public enum PathPattern {
     /// encoding share an identity; encoded reserved characters retain their meaning as data.
     public static func matchingKey(for pattern: String) -> [String] {
         segments(in: pattern.utf8).map { segment in
-            if segment.hasPrefix(":") { return ":" }
             // A literal key never holds a raw brace, so a template key cannot equal one.
             if let template = SegmentTemplate(segment) { return template.key }
+            if segment.hasPrefix(":") { return ":" }
             return literalKey(segment)
         }
     }
@@ -189,8 +189,12 @@ public enum PathPattern {
     /// Whether a segment is a `{name}` template this matcher can act on. A brace it cannot pair
     /// leaves the segment literal, which is how a spec importer tells a route it can serve from one
     /// it would only store.
+    ///
+    /// Checked before the `:name` wildcard rule: OpenAPI allows literal text before a template, and
+    /// that text may start with a colon (`:prefix{id}`). Only a segment with no template is a
+    /// wildcard.
     public static func isTemplate(segment: String) -> Bool {
-        !segment.hasPrefix(":") && SegmentTemplate(segment) != nil
+        SegmentTemplate(segment) != nil
     }
 
     public static func rank(requestPath: String, pattern: String) -> Rank? {
@@ -202,12 +206,12 @@ public enum PathPattern {
         var literalMatches = 0
         var templateMatches = 0
         for (requestSegment, patternSegment) in zip(requestSegments, patternSegments) {
-            if patternSegment.hasPrefix(":") { continue }
             if let template = SegmentTemplate(patternSegment) {
                 guard template.matches(literalKey(requestSegment)) else { return nil }
                 templateMatches += 1
                 continue
             }
+            if patternSegment.hasPrefix(":") { continue }
             if literalKey(requestSegment) != literalKey(patternSegment) { return nil }
             literalMatches += 1
         }

@@ -268,7 +268,7 @@ struct OpenAPIParserTests {
     }
 
     @Test("Partial-segment templates import as written", arguments: [
-        "/files/{name}.json", "/v{major}/users", "/range/{from}-{to}",
+        "/files/{name}.json", "/v{major}/users", "/range/{from}-{to}", "/x/:prefix{id}",
     ])
     func partialTemplatesImport(path: String) async throws {
         for (format, version) in [("openapi", "3.0.3"), ("openapi", "3.1.0"), ("swagger", "2.0")] {

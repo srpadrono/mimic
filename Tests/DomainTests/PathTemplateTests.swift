@@ -13,6 +13,7 @@ struct PathTemplateTests {
         ("/range/{from}-{to}", "/range/1-9"),
         ("/range/{from}-{to}", "/range/1-2-3"),
         ("/things/{id}:batchGet", "/things/42:batchGet"),
+        ("/x/:prefix{id}", "/x/:prefix42"),
         ("/caf\u{e9}/{name}.json", "/caf%C3%A9/menu.json"),
         ("/files/{name}.json", "/files/r%C3%A9sum%C3%A9.json"),
     ])
@@ -29,6 +30,8 @@ struct PathTemplateTests {
         ("/range/{from}-{to}", "/range/19"),
         ("/range/{from}-{to}", "/range/-9"),
         ("/files/{name}.json", "/files/a%2Fb"),
+        // A colon before a template is literal text, not the `:name` wildcard.
+        ("/x/:prefix{id}", "/x/anything"),
     ])
     func templateRefuses(pattern: String, request: String) {
         #expect(!PathPattern.matches(requestPath: request, pattern: pattern))
@@ -41,6 +44,8 @@ struct PathTemplateTests {
         }
         #expect(PathPattern.isTemplate(segment: "{iata}.json"))
         #expect(!PathPattern.isTemplate(segment: ":id"))
+        #expect(PathPattern.isTemplate(segment: ":prefix{id}"))
+        #expect(PathPattern.matchingKey(for: "/x/:prefix{id}") == ["x", ":prefix{}"])
         #expect(PathPattern.matches(requestPath: "/x/%7Bunclosed", pattern: "/x/{unclosed"))
     }
 
