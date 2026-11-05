@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
+      contents: read          # check out the repository; job permissions replace read-all
       security-events: write  # upload the results as code scanning alerts
       id-token: write         # sign the published results with this workflow's identity
     steps:
