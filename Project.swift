@@ -267,7 +267,9 @@ let project = Project(
             buildableFolders: ["Sources/SpecImport"],
             dependencies: [
                 .target(name: "Domain"),
+                .external(name: "OpenAPIKit"),
                 .external(name: "OpenAPIKit30"),
+                .external(name: "OpenAPIKitCompat"),
             ],
             settings: .settings(base: ["SWIFT_DEFAULT_ACTOR_ISOLATION": "none"])
         ),

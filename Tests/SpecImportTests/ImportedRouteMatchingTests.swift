@@ -327,19 +327,15 @@ struct ImportedRouteMatchingTests {
         #expect(ImportPath.route("/") == "/")
     }
 
-    @Test("The low-level rewrite does not widen unsupported partial templates")
-    func partialSegmentParametersStayLiteral() {
-        // Spec parsers refuse these templates. The helper itself preserves the literal instead
-        // of turning a suffix-constrained parameter into a wildcard that matches too much.
+    @Test("A partial template is kept as written and matches only the requests it describes")
+    func partialSegmentParametersKeepTheirLiteralText() {
+        // Kept verbatim rather than rewritten to `:name`, which would also answer `report.xml`:
+        // `PathPattern` matches the literal text around a `{name}` template itself.
         let partial = ImportPath.route("/files/{name}.json")
         #expect(partial == "/files/{name}.json")
-        #expect(
-            PathPattern.matches(requestPath: "/files/report.json", pattern: partial) == false,
-            "a partial template has no equivalent whole-segment pattern"
-        )
-        // …and this is what was rejected in exchange. `:name` would answer requests the document
-        // never described, which is worse than a route that is obviously wrong.
-        #expect(PathPattern.matches(requestPath: "/files/report.xml", pattern: "/files/:name"))
+        #expect(PathPattern.matches(requestPath: "/files/report.json", pattern: partial))
+        #expect(!PathPattern.matches(requestPath: "/files/report.xml", pattern: partial))
+        #expect(!PathPattern.matches(requestPath: "/files/.json", pattern: partial))
 
         #expect(ImportPath.route("/v{major}/users") == "/v{major}/users")
         #expect(ImportPath.route("/x/{a}-{b}") == "/x/{a}-{b}")

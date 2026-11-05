@@ -45,7 +45,7 @@ This walkthrough takes about ten minutes. You will call the sample project's end
 ### Four ideas
 
 - A **project** is one mock setup: its endpoints, scenarios, journeys, and local ports. Mimic keeps your projects and can reopen the last one at launch.
-- An **endpoint** is a method and a path, such as `GET /account-summary`. A path can contain `:param` segments, so `/products/:id` matches `/products/42`.
+- An **endpoint** is a method and a path, such as `GET /account-summary`. A path can contain `:param` segments, so `/products/:id` matches `/products/42`, and `{param}` templates inside a segment, so `/airport/{code}.json` matches `/airport/LHR.json`.
 - A **scenario** is one response for an endpoint: a status, a body, headers, and an optional delay. An endpoint can have several; exactly one is **live** and answers every request.
 - A **journey** scripts a flow across endpoints, so the same route can answer differently as a client moves through it.
 
@@ -125,7 +125,7 @@ Close the project (File ▸ Close Project) and choose **New project…** (⌘N) 
 
 - **Add endpoint**: write responses by hand.
 - **Import HAR**: turn traffic recorded in Proxyman, Charles, or your browser's DevTools into endpoints.
-- **Import OpenAPI**: turn each operation of an OpenAPI 3 or Swagger 2 spec, as JSON, into an endpoint with its example response.
+- **Import OpenAPI**: turn each operation of an OpenAPI 3.0, 3.1 or 3.2 or Swagger 2 spec, as JSON, into an endpoint with its example response.
 
 <img src="docs/images/readme/new-project.png" width="880" alt="An empty project offering Add endpoint, Import HAR, and Import OpenAPI">
 
@@ -149,7 +149,7 @@ mimic server start
 curl http://127.0.0.1:8080/account-summary
 ```
 
-Edit an endpoint or activate a different scenario while the server runs; the next request uses the new response. Routes can contain `:param` segments. Unmatched requests appear in the request log, where you can turn them into endpoints or journey steps.
+Edit an endpoint or activate a different scenario while the server runs; the next request uses the new response. Routes can contain `:param` segments and `{param}` templates such as `{id}.json`. Unmatched requests appear in the request log, where you can turn them into endpoints or journey steps.
 
 A **journey** returns different results as a client moves through a flow. For example, the built-in retry journey fails the first account-summary request and succeeds on the next. Steps can also drop a connection or hold it long enough to exercise a client timeout. See [Journeys](docs/JOURNEYS.md).
 

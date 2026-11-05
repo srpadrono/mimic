@@ -5,6 +5,20 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Import OpenAPI 3.1 and 3.2 specs, the version FastAPI and most current generators write. Only
+  3.0 imported before; a 3.1 file failed with a parse error before any path was read.
+- Paths can hold `{param}` templates inside a segment, as OpenAPI writes them: `/airport/{code}.json`
+  matches `/airport/LHR.json` and not `/airport/LHR.xml`. Spec imports keep them as written instead
+  of refusing them. A literal segment outranks a template, and a template outranks a `:param`
+  wildcard.
+
+### Changed
+
+- A raw `{` and `}` pair in an endpoint or journey path is now a template. To match braces
+  literally, percent-encode them (`%7B`, `%7D`), which is what HTTP clients send.
+
 ## [0.15.0] — 2026-10-14
 
 ### Added
