@@ -5,6 +5,8 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-11-05
+
 ### Added
 
 - Import OpenAPI 3.1 and 3.2 specs, the version FastAPI and most current generators write. Only
@@ -18,6 +20,14 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - A raw `{` and `}` pair in an endpoint or journey path is now a template. To match braces
   literally, percent-encode them (`%7B`, `%7D`), which is what HTTP clients send.
+
+### Security
+
+- Publishing a release opens the Homebrew tap update, after checking the installer against
+  GitHub's sha256 digest and the release build provenance.
+- OpenSSF Scorecard runs weekly, dependency review blocks pull requests that add vulnerable or
+  unexpectedly licensed dependencies, and CodeQL also checks the Homebrew cask.
+- Dependency updates: Vapor, GRDB 7.12.0 and swift-nio-extras 1.35.2.
 
 ## [0.15.0] — 2026-10-14
 
@@ -632,6 +642,7 @@ Ships as a signed and notarised installer that puts Mimic.app in `/Applications`
 Beta, and versioned below 1.0 deliberately: the interface and the stored project format may still
 change between releases.
 
+[0.16.0]: https://github.com/srpadrono/mimic/releases/tag/v0.16.0
 [0.15.0]: https://github.com/srpadrono/mimic/releases/tag/v0.15.0
 [0.14.0]: https://github.com/srpadrono/mimic/releases/tag/v0.14.0
 [0.13.0]: https://github.com/srpadrono/mimic/releases/tag/v0.13.0
