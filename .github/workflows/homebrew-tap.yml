@@ -1,0 +1,127 @@
+name: Homebrew tap
+
+# Opens the pull request that moves srpadrono/homebrew-tap to a newly published release, so the
+# cask's version and sha256 are never copied by hand.
+#
+# Runs when a release is *published*, not when its tag is pushed: the Release workflow stops at a
+# draft, and a person publishes it after the regression gate. Before anything is written the
+# installer is checked twice: its bytes against the digest GitHub computed when the asset was
+# uploaded, and its build provenance against the Release workflow's signing identity. An installer
+# this repository's workflow did not build never reaches the tap.
+#
+# The cask is `Packaging/Homebrew/Casks/mimic.rb` at the release's tag with only `version` and
+# `sha256` replaced, so this repository stays the single source of truth for everything else in it.
+#
+# Writing to another repository needs a token GITHUB_TOKEN cannot provide: `HOMEBREW_TAP_TOKEN`, a
+# fine-grained token scoped to srpadrono/homebrew-tap alone with Contents and Pull requests
+# read/write. The commit is made through the API, so GitHub signs it. The pull request is left for a
+# person to merge.
+
+on:
+  release:
+    types: [published]
+  # Re-opens the pull request for a release already published: run it from the release's tag.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homebrew-tap
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Open the tap pull request
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      attestations: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_REPO: ${{ github.repository }}
+      TAP_REPO: srpadrono/homebrew-tap
+      # The release's tag, or the ref a manual run was started from. Read from the environment,
+      # never interpolated into the script, so a tag name cannot become shell.
+      TAG: ${{ github.event.release.tag_name || github.ref_name }}
+    steps:
+      - name: Check the tag is a release version
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$TAG is not a vX.Y.Z release tag."
+            exit 1
+          fi
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+
+      - name: Download and verify the installer
+        run: |
+          pkg="Mimic-$VERSION.pkg"
+          gh release download "$TAG" --repo "$SOURCE_REPO" --pattern "$pkg" --dir "$RUNNER_TEMP"
+
+          digest=$(gh api "repos/$SOURCE_REPO/releases/tags/$TAG" \
+            --jq ".assets[] | select(.name == \"$pkg\") | .digest")
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::GitHub published no sha256 digest for $pkg."
+            exit 1
+          fi
+          sha=$(sha256sum "$RUNNER_TEMP/$pkg" | cut -d' ' -f1)
+          if [[ "sha256:$sha" != "$digest" ]]; then
+            echo "::error::$pkg hashes to $sha, but GitHub's digest is ${digest#sha256:}."
+            exit 1
+          fi
+
+          gh attestation verify "$RUNNER_TEMP/$pkg" --repo "$SOURCE_REPO" \
+            --signer-workflow "$SOURCE_REPO/.github/workflows/release.yml" \
+            --source-ref "refs/tags/$TAG"
+          echo "SHA256=$sha" >> "$GITHUB_ENV"
+
+      - name: Write the cask
+        run: |
+          cask="$RUNNER_TEMP/mimic.rb"
+          sed -E \
+            -e "s/^  version \"[^\"]*\"$/  version \"$VERSION\"/" \
+            -e "s/^  sha256 \"[0-9a-f]{64}\"$/  sha256 \"$SHA256\"/" \
+            Packaging/Homebrew/Casks/mimic.rb > "$cask"
+          grep -qx "  version \"$VERSION\"" "$cask" && grep -qx "  sha256 \"$SHA256\"" "$cask" || {
+            echo "::error::Packaging/Homebrew/Casks/mimic.rb no longer has the version and sha256 lines this step rewrites."
+            exit 1
+          }
+          ruby -c "$cask"
+
+      - name: Open the pull request
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::error::Add the HOMEBREW_TAP_TOKEN secret (see this workflow's header), then re-run."
+            exit 1
+          fi
+          branch="mimic-$VERSION"
+          base=$(gh api "repos/$TAP_REPO" --jq .default_branch)
+          base_sha=$(gh api "repos/$TAP_REPO/git/ref/heads/$base" --jq .object.sha)
+          if ! gh api "repos/$TAP_REPO/git/ref/heads/$branch" > /dev/null 2>&1; then
+            gh api "repos/$TAP_REPO/git/refs" -f ref="refs/heads/$branch" -f sha="$base_sha" > /dev/null
+          fi
+
+          current=$(gh api "repos/$TAP_REPO/contents/Casks/mimic.rb?ref=$branch" --jq .sha)
+          gh api -X PUT "repos/$TAP_REPO/contents/Casks/mimic.rb" \
+            -f message="mimic $VERSION" \
+            -f content="$(base64 -w0 "$RUNNER_TEMP/mimic.rb")" \
+            -f branch="$branch" \
+            -f sha="$current" > /dev/null
+
+          if [[ -z "$(gh pr list --repo "$TAP_REPO" --head "$branch" --state open --json number --jq '.[].number')" ]]; then
+            gh pr create --repo "$TAP_REPO" --base "$base" --head "$branch" \
+              --title "mimic $VERSION" \
+              --body "Moves the cask to [Mimic $TAG](https://github.com/$SOURCE_REPO/releases/tag/$TAG).
+
+          The installer's bytes matched GitHub's sha256 digest, and \`gh attestation verify\` confirmed it was built by \`$SOURCE_REPO/.github/workflows/release.yml\` from \`$TAG\`.
+
+          Opened by [$GITHUB_WORKFLOW]($GITHUB_SERVER_URL/$SOURCE_REPO/actions/runs/$GITHUB_RUN_ID)."
+          fi

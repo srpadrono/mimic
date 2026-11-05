@@ -1,14 +1,15 @@
 name: CodeQL
 
-# Static analysis for the three languages this repository ships: Swift (the app, CLI and server),
-# Python (the `Scripts/` checks CI trusts), and the GitHub Actions workflows themselves.
+# Static analysis for the four languages this repository ships: Swift (the app, CLI and server),
+# Python (the `Scripts/` checks CI trusts), Ruby (the Homebrew cask every `brew install` evaluates),
+# and the GitHub Actions workflows themselves.
 #
-# Python and Actions need no build, so they analyse on Linux. Swift is traced from a real compile,
+# Python, Ruby and Actions need no build, so they analyse on Linux. Swift is traced from a real compile,
 # which needs the same macOS 26 image, pinned Tuist and generated workspace as CI; the shared
 # `macos-setup` action provides all three. Only the Debug app scheme is built: it compiles every
 # first-party module the release does, plus the `mimic` CLI.
 #
-# Python and Actions run on pull requests and main. Swift needs a macOS runner and a full build from
+# Python, Ruby and Actions run on pull requests and main. Swift needs a macOS runner and a full build from
 # scratch, and the account gets five macOS runners at a time, so Swift runs nightly (and on a manual
 # run) instead of taking a runner from every pull request's tests.
 
@@ -43,7 +44,7 @@ jobs:
       # Swift joins the matrix only on scheduled and manual runs. A static `include` entry cannot be
       # left out conditionally (an unmatched include becomes its own leg), so the list is built here.
       matrix:
-        include: ${{ fromJSON(format('[{0}{1}]', '{"language":"actions","build-mode":"none","runner":"ubuntu-latest","timeout":15},{"language":"python","build-mode":"none","runner":"ubuntu-latest","timeout":15}', (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && ',{"language":"swift","build-mode":"manual","runner":"macos-26","timeout":90}' || '')) }}
+        include: ${{ fromJSON(format('[{0}{1}]', '{"language":"actions","build-mode":"none","runner":"ubuntu-latest","timeout":15},{"language":"python","build-mode":"none","runner":"ubuntu-latest","timeout":15},{"language":"ruby","build-mode":"none","runner":"ubuntu-latest","timeout":15}', (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && ',{"language":"swift","build-mode":"manual","runner":"macos-26","timeout":90}' || '')) }}
 
     env:
       DERIVED_DATA: .artifacts/DerivedData
