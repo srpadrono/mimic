@@ -58,7 +58,12 @@ let package = Package(
 
         .target(
             name: "SpecImport",
-            dependencies: ["Domain", .product(name: "OpenAPIKit30", package: "OpenAPIKit")],
+            dependencies: [
+                "Domain",
+                .product(name: "OpenAPIKit", package: "OpenAPIKit"),
+                .product(name: "OpenAPIKit30", package: "OpenAPIKit"),
+                .product(name: "OpenAPIKitCompat", package: "OpenAPIKit"),
+            ],
             path: "Sources/SpecImport",
             swiftSettings: sharedSwiftSettings
         ),

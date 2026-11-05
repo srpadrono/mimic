@@ -54,9 +54,9 @@ enum ImportPath {
     ///   guard. A spec emitted by a tool that writes Express-style routes already says what Mimic
     ///   says; translating an already-translated route is how `::id` gets shipped.
     /// - **A partial segment is left verbatim.** `/files/{name}.json`, `v{major}` and `{a}-{b}`
-    ///   cannot be expressed by the whole-segment matcher. The spec parsers refuse these templates
-    ///   before candidate construction. This low-level rewrite preserves them rather than widening
-    ///   their meaning: replacing `{name}.json` with `:name` would also match `report.xml`.
+    ///   are templates `PathPattern` matches as written, literal text and all. Rewriting
+    ///   `{name}.json` to `:name` would widen it to match `report.xml` too. The spec parsers refuse
+    ///   a brace that does not pair before candidate construction.
     ///
     /// The name is reduced to letters, numbers, `_`, `-` and `.`; anything else a spec puts inside
     /// the braces (RFC 6570 modifiers like `{petId*}`, stray whitespace) is dropped, and a name left

@@ -1,5 +1,5 @@
 import Foundation
-import OpenAPIKit30
+import OpenAPIKit
 
 /// Generates placeholder JSON examples from OpenAPI/Swagger schemas.
 enum SchemaExampleGenerator {
@@ -26,8 +26,9 @@ enum SchemaExampleGenerator {
         guard depth >= 0, depth < maxDepth, remainingVisits > 0 else { return nil }
         remainingVisits -= 1
 
-        // Check for explicit example first
-        if let example = schema.example {
+        // Check for explicit example first. 3.1 schemas carry a JSON Schema `examples` list; a 3.0
+        // `example` arrives as its only member after conversion.
+        if let example = schema.examples.first {
             return declaredValue(example.value)
         }
         if let value = schema.defaultValue { return declaredValue(value.value) }
@@ -39,6 +40,10 @@ enum SchemaExampleGenerator {
         switch schema.value {
         case .boolean:
             return false
+
+        case .null:
+            // 3.1 writes a null-only schema as `type: "null"`; 3.0 could not express one.
+            return NSNull()
 
         case .integer(_, let context):
             return integerPlaceholder(context)
@@ -136,7 +141,8 @@ enum SchemaExampleGenerator {
             }
             return nil
 
-        case .not, .fragment:
+        // A `$dynamicRef` resolves against the evaluation path, which a preview has no notion of.
+        case .not, .fragment, .dynamicReference:
             return nil
         }
     }
