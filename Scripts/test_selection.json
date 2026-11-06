@@ -143,6 +143,7 @@
     ".github/workflows/release.yml",
     ".github/workflows/fuzz.yml",
     "Fuzz/**",
+    ".bestpractices.json",
     "Packaging/**",
     ".gitignore",
     "Package.swift",
