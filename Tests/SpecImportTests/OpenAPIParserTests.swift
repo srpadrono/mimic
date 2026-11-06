@@ -681,6 +681,26 @@ struct OpenAPIParserTests {
         }
     }
 
+    @Test("A raw control character inside an operation is refused before OpenAPIKit decodes it")
+    func controlCharacterInsideOperationIsRefused() async {
+        // Found by Fuzz/FuzzOpenAPI. JSON forbids an unescaped U+0004 in a string, and OpenAPIKit 7
+        // traps instead of throwing when `JSONDecoder` reports that from inside an operation: the
+        // import crashed the app. Kept byte for byte in Fuzz/Corpus/openapi as well.
+        let spec = #"{"openapi":"3.1.0","info":{"title":"","version":""},"paths":{"":{"post":{"":{"":{"\#u{04}":""}}}}}}"#
+        let error = await #expect(throws: (any Error).self) {
+            try await OpenAPIParser.parse(data: Data(spec.utf8))
+        }
+        #expect(error?.localizedDescription.contains("not a JSON OpenAPI or Swagger document") == true)
+    }
+
+    @Test("A JSON array is refused as a document")
+    func topLevelArrayIsRefused() async {
+        let error = await #expect(throws: (any Error).self) {
+            try await OpenAPIParser.parse(data: Data(#"[{"openapi":"3.1.0"}]"#.utf8))
+        }
+        #expect(error?.localizedDescription.contains("not a JSON OpenAPI or Swagger document") == true)
+    }
+
     // MARK: - Swagger 2.0
 
     @Test("Parses a Swagger 2.0 spec")

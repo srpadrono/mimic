@@ -37,3 +37,6 @@ __pycache__/
 
 # Per-developer build settings (see Configs/Local.xcconfig.example)
 Configs/Local.xcconfig
+
+# Copied from the root Package.resolved by Fuzz/run.sh, so the fuzzers build against the shipped pins
+Fuzz/Package.resolved

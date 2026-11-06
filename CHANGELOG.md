@@ -5,6 +5,16 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Importing a malformed OpenAPI file no longer crashes the app. A file that is not valid JSON, such
+  as one with a raw control character inside an operation, now fails with a message saying so.
+
+### Security
+
+- The HAR and OpenAPI importers, project exports and control API commands are fuzzed with libFuzzer
+  and AddressSanitizer on every change to them and nightly. See `Fuzz/README.md`.
+
 ## [0.16.0] — 2026-11-05
 
 ### Added

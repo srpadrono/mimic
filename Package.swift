@@ -16,6 +16,9 @@ let package = Package(
     products: [
         .executable(name: "mimic", targets: ["mimic"]),
         .library(name: "MimicDomain", targets: ["Domain"]),
+        // For the fuzz targets in `Fuzz/`, which build as a separate package so the fuzzer's
+        // instrumentation never reaches the app, the CLI or their tests.
+        .library(name: "MimicSpecImport", targets: ["SpecImport"]),
     ],
     dependencies: [
         .package(url: "https://github.com/vapor/vapor", from: "4.76.0"),

@@ -1,0 +1,3 @@
+{"schemaVersion":3,"id":"6F1A2B3C-0000-4000-8000-000000000001","name":"Store","serverConfiguration":{"port":8080},
+ "endpoints":[{"id":"6F1A2B3C-0000-4000-8000-000000000002","method":"GET","path":"/orders/{id}","scenarios":[]}],
+ "journeys":[{"id":"6F1A2B3C-0000-4000-8000-000000000003","name":"Checkout","steps":[]}]}
