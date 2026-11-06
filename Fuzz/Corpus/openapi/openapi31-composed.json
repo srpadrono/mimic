@@ -1,0 +1,7 @@
+{"openapi":"3.1.0","info":{"title":"Composed","version":"1.0"},"servers":[{"url":"https://api.example.com/v2"}],
+ "paths":{"/orders":{"post":{"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Order"}}}},
+  "responses":{"201":{"description":"made","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Order"}}}},
+   "default":{"description":"error","content":{"application/problem+json":{"schema":{"oneOf":[{"type":"string"},{"type":"null"}]}}}}}}}},
+ "components":{"schemas":{"Order":{"allOf":[{"$ref":"#/components/schemas/Base"},{"type":"object","properties":{
+  "lines":{"type":"array","items":{"$ref":"#/components/schemas/Order"}},"status":{"enum":["open","paid"]},"total":{"type":["number","null"],"minimum":0}}}]},
+  "Base":{"type":"object","properties":{"id":{"type":"string","format":"uuid"},"created":{"type":"string","format":"date-time"}}}}}}

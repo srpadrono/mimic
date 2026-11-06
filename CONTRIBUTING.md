@@ -74,6 +74,8 @@ Use the Release build after a manifest or dependency change. `./Scripts/ci.sh` r
 
 For documentation or script changes, run the applicable checks in `Scripts/`, including `python3 Scripts/check_doc_counts.py` for local links and test targets, `python3 -m unittest discover -s Scripts/tests -p 'test_*.py'` for script regressions, and `git diff --check`. A documentation edit does not need an XCUITest run. Coverage reports read existing result bundles; neither coverage nor source declaration counts prove that tests passed.
 
+A change to the HAR or OpenAPI importers, or to how projects and control commands decode, is also fuzzed: the `Fuzz` workflow runs each libFuzzer target for two minutes on such a pull request and for twenty nightly. To fuzz locally, or to turn a finding into a regression test, see [Fuzzing](Fuzz/README.md).
+
 ### What CI runs
 
 A pull request or push runs only the tests its changes can break. CI's first job, `Scripts/select_tests.py`, reads the changed files and `Scripts/test_selection.json`, and its summary says what it selected and why:

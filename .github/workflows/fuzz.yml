@@ -1,0 +1,73 @@
+name: Fuzz
+
+# libFuzzer runs against the code that reads files and payloads Mimic did not write: HAR captures,
+# OpenAPI and Swagger specs, project exports and control API commands (Fuzz/README.md). Every
+# target is built with AddressSanitizer, so a crash, a trap, a memory error, a hang or runaway memory
+# fails the job and uploads the input that caused it.
+#
+# Pull requests that touch the parsers fuzz each target for two minutes. The nightly run gives each
+# twenty, which is where most findings come from.
+
+on:
+  pull_request:
+    paths:
+      - "Fuzz/**"
+      - "Sources/Domain/**"
+      - "Sources/SpecImport/**"
+      - "Package.swift"
+      - "Package.resolved"
+      - ".github/workflows/fuzz.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Fuzz/**"
+      - "Sources/Domain/**"
+      - "Sources/SpecImport/**"
+      - "Package.swift"
+      - "Package.resolved"
+      - ".github/workflows/fuzz.yml"
+  schedule:
+    - cron: "23 1 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds to fuzz each target
+        type: number
+        default: 600
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  fuzz:
+    name: Fuzz the importers (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # The same exact toolchain as the Linux build in ci.yml. Apple's toolchains ship no libFuzzer.
+    container: swift:6.2.4
+    env:
+      FUZZ_SECONDS: ${{ github.event_name == 'schedule' && 1200 || github.event_name == 'workflow_dispatch' && inputs.seconds || 120 }}
+      # Swift's own crash backtracer reads memory ASan reports as an overflow, which hides the real
+      # trap. libFuzzer prints the stack instead.
+      SWIFT_BACKTRACE: enable=no
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build and fuzz
+        run: Fuzz/run.sh
+
+      - name: Upload failing inputs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-findings
+          path: .artifacts/fuzz/findings
+          if-no-files-found: ignore
+          retention-days: 30

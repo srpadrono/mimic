@@ -141,6 +141,8 @@
     ".github/dependabot.yml",
     ".github/workflows/codeql.yml",
     ".github/workflows/release.yml",
+    ".github/workflows/fuzz.yml",
+    "Fuzz/**",
     "Packaging/**",
     ".gitignore",
     "Package.swift",

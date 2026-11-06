@@ -1,0 +1,45 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Storefront", "version": "1.0.0" },
+  "servers": [ { "url": "https://api.storefront.example/v1" } ],
+  "paths": {
+    "/products": {
+      "get": {
+        "operationId": "listProducts",
+        "responses": {
+          "200": {
+            "description": "Every product",
+            "content": { "application/json": { "example": { "products": [ { "id": "lamp", "price": 39.5 } ] } } }
+          }
+        }
+      }
+    },
+    "/products/{id}": {
+      "get": {
+        "operationId": "getProduct",
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": {
+            "description": "One product",
+            "content": { "application/json": { "example": { "id": "lamp", "name": "Desk lamp", "price": 39.5 } } }
+          },
+          "404": {
+            "description": "No such product",
+            "content": { "application/json": { "example": { "error": "not_found" } } }
+          }
+        }
+      }
+    },
+    "/orders": {
+      "post": {
+        "operationId": "createOrder",
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": { "application/json": { "example": { "order": "o_77", "status": "placed" } } }
+          }
+        }
+      }
+    }
+  }
+}

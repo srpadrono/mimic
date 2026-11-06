@@ -3,6 +3,7 @@ import Domain
 import OpenAPIKit
 
 private enum OpenAPIImportError: LocalizedError {
+    case notAJSONObject
     case unresolvedResponse(String)
     case unresolvedSwaggerResponse(String)
     case unsupportedPathItem(String)
@@ -10,6 +11,8 @@ private enum OpenAPIImportError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        case .notAJSONObject:
+            return "This file is not a JSON OpenAPI or Swagger document. Export the spec as JSON and try again."
         case .unresolvedResponse(let reference):
             return "Cannot resolve OpenAPI response reference \(reference)."
         case .unresolvedSwaggerResponse(let reference):
@@ -34,15 +37,20 @@ public enum OpenAPIParser {
         try Task.checkCancellation()
         let parsing = Task.detached {
             try Task.checkCancellation()
-            // Peek at the JSON to detect spec version
-            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            if let swagger = dict?["swagger"] as? String, swagger.hasPrefix("2") {
+            // Validate the whole document as JSON before any `Decodable` reads it, and peek at it
+            // for the spec version. OpenAPIKit traps (it does not throw) when `JSONDecoder` reports
+            // malformed JSON from inside an operation, and a trap here would take the app down with
+            // it. The fuzzer in Fuzz/ found this with a control character in a key.
+            guard let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+                throw OpenAPIImportError.notAJSONObject
+            }
+            if let swagger = dict["swagger"] as? String, swagger.hasPrefix("2") {
                 return try parseSwagger2(data: data, existingEndpoints: existingEndpoints)
             }
             // Default: try OpenAPI 3.x
             try Task.checkCancellation()
             let document = try OpenAPIDocumentDecoder.decode(
-                data, declaredVersion: dict?["openapi"] as? String
+                data, declaredVersion: dict["openapi"] as? String
             )
             return try candidatesFromDocument(
                 document,
