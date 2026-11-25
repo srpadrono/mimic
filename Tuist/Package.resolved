@@ -1,5 +1,5 @@
 {
-  "originHash" : "1800752b581c0a27241d656564023befa7d5bfa95b4d531d326b9d38fb580de7",
+  "originHash" : "becf10bb381ea0f0df17f32c96792e5ca0f5965d2c28e7e5b5dee51e39bb1306",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -285,8 +285,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/vapor/vapor",
       "state" : {
-        "revision" : "48852309b11230e62a89b41a9c578c93f4d2d916",
-        "version" : "4.122.3"
+        "revision" : "cf69b535b3d5ba6c50920d9470d304cfac409899",
+        "version" : "4.122.4"
       }
     },
     {
